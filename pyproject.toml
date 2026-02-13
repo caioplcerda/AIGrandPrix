@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aigrandprix"
+version = "0.1.0"
+description = "Autonomous drone racing AI for the AI Grand Prix competition"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Caio de Paula Lacerda"},
+]
+
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "opencv-python>=4.8",
+    "torch>=2.1",
+    "torchvision>=0.16",
+    "gymnasium>=0.29",
+    "stable-baselines3>=2.1",
+    "pyyaml>=6.0",
+    "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.1",
+    "mypy>=1.5",
+    "ipykernel>=6.25",
+]
+sim = [
+    "crazyflow>=0.1",
+    "pybullet>=3.2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true

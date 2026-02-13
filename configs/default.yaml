@@ -1,0 +1,42 @@
+# AI Grand Prix - Default Configuration
+
+race:
+  max_speed: 15.0          # m/s maximum drone speed
+  max_accel: 10.0          # m/s^2 maximum acceleration
+  control_dt: 0.01         # control loop timestep (100 Hz)
+  replan_interval: 0.5     # seconds between trajectory replanning
+
+perception:
+  method: "hybrid"         # color | cnn | hybrid
+  camera_fov: 90           # degrees
+  image_width: 640
+  image_height: 480
+  gate_color_lower: [0, 100, 100]    # HSV lower bound
+  gate_color_upper: [10, 255, 255]   # HSV upper bound
+
+control:
+  pid:
+    kp: [6.0, 6.0, 8.0]
+    ki: [0.1, 0.1, 0.2]
+    kd: [3.5, 3.5, 4.5]
+  max_rate: 8.0            # rad/s max angular rate
+  max_thrust: 1.0          # normalized
+
+planning:
+  approach_distance: 1.5   # meters before gate for approach waypoint
+  exit_distance: 1.0       # meters after gate for exit waypoint
+  trajectory_dt: 0.02      # trajectory sampling interval
+
+simulation:
+  num_gates: 5
+  max_steps: 2000
+  render: false
+
+training:
+  algorithm: "PPO"
+  total_timesteps: 1000000
+  learning_rate: 0.0003
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
