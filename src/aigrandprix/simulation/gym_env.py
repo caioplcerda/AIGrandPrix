@@ -57,6 +57,8 @@ class DroneRacingEnv(gym.Env):
         self._drone_vel = np.zeros(3)
         self._drone_orient = np.array([1.0, 0, 0, 0])
         self._drone_angular_vel = np.zeros(3)
+        # Euler angles tracked from integrated angular rates (roll, pitch, yaw)
+        self._drone_rpy = np.zeros(3)
 
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
@@ -74,6 +76,7 @@ class DroneRacingEnv(gym.Env):
         self._drone_vel = np.zeros(3)
         self._drone_orient = np.array([1.0, 0, 0, 0])
         self._drone_angular_vel = np.zeros(3)
+        self._drone_rpy = np.zeros(3)
 
         return self._get_obs(), {}
 
@@ -83,6 +86,27 @@ class DroneRacingEnv(gym.Env):
         # Simple physics step (placeholder - will be replaced by actual sim)
         thrust, roll_r, pitch_r, yaw_r = action
         dt = 0.02
+
+        # Integrate angular rates -> Euler angles (roll, pitch, yaw)
+        self._drone_rpy += np.array([roll_r, pitch_r, yaw_r]) * dt
+        # Dampen angles toward zero (aerodynamic restoring moment)
+        self._drone_rpy *= 0.98
+        # Clamp to physically reasonable range
+        self._drone_rpy[0] = np.clip(self._drone_rpy[0], -np.pi / 3, np.pi / 3)  # roll ±60°
+        self._drone_rpy[1] = np.clip(self._drone_rpy[1], -np.pi / 3, np.pi / 3)  # pitch ±60°
+        self._drone_angular_vel = np.array([roll_r, pitch_r, yaw_r])
+
+        # Update quaternion from Euler angles for observation consistency
+        roll, pitch, yaw = self._drone_rpy
+        cr, sr = np.cos(roll / 2), np.sin(roll / 2)
+        cp, sp = np.cos(pitch / 2), np.sin(pitch / 2)
+        cy, sy = np.cos(yaw / 2), np.sin(yaw / 2)
+        self._drone_orient = np.array([
+            cr * cp * cy + sr * sp * sy,  # w
+            sr * cp * cy - cr * sp * sy,  # x
+            cr * sp * cy + sr * cp * sy,  # y
+            cr * cp * sy - sr * sp * cy,  # z
+        ])
 
         # Simplified dynamics
         accel = np.array([
