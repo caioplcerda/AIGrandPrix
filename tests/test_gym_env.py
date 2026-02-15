@@ -234,3 +234,76 @@ class TestInfo:
                 np.array([0.5, 0, 1.0, 0], dtype=np.float32)
             )
         assert info["speed"] >= 0
+
+
+# ---------------------------------------------------------------------------
+# Normalization (Step 4)
+# ---------------------------------------------------------------------------
+
+class TestNormalization:
+    def test_normalized_obs_in_range(self):
+        e = DroneRacingEnv(num_gates=3, max_steps=100, normalize_obs=True)
+        obs, _ = e.reset(seed=42)
+        assert obs.shape == (19,)
+        assert np.all(obs >= -1.0) and np.all(obs <= 1.0)
+        for _ in range(20):
+            action = e.action_space.sample()
+            obs, _, terminated, truncated, _ = e.step(action)
+            assert np.all(obs >= -1.0) and np.all(obs <= 1.0), f"Obs out of range: {obs}"
+            if terminated or truncated:
+                break
+        e.close()
+
+    def test_normalized_actions_rescale(self):
+        e = DroneRacingEnv(num_gates=3, max_steps=100, normalize_actions=True)
+        e.reset(seed=42)
+        # Action [-1, -1, -1, -1] -> thrust=0, roll=-8, pitch=-8, yaw=-4
+        # Action [1, 1, 1, 1] -> thrust=1, roll=8, pitch=8, yaw=4
+        # Action [0, 0, 0, 0] -> thrust=0.5, roll=0, pitch=0, yaw=0 (hover)
+        initial_z = e._drone_pos[2]
+        for _ in range(10):
+            e.step(np.array([0, 0, 0, 0], dtype=np.float32))
+        # thrust=0.5 should roughly hover
+        assert abs(e._drone_pos[2] - initial_z) < 0.5
+        e.close()
+
+    def test_check_env_with_normalization(self):
+        e = DroneRacingEnv(num_gates=3, max_steps=100, normalize_obs=True, normalize_actions=True)
+        check_env(e, skip_render_check=True)
+        e.close()
+
+    def test_normalized_shape_still_19(self):
+        e = DroneRacingEnv(num_gates=3, max_steps=100, normalize_obs=True, normalize_actions=True)
+        obs, _ = e.reset(seed=0)
+        assert obs.shape == (19,)
+        assert e.action_space.shape == (4,)
+        e.close()
+
+
+# ---------------------------------------------------------------------------
+# Dynamics model integration (Step 6)
+# ---------------------------------------------------------------------------
+
+class TestDynamicsModel:
+    def test_dynamics_mode_does_not_crash(self):
+        e = DroneRacingEnv(num_gates=3, max_steps=200, use_dynamics_model=True)
+        obs, _ = e.reset(seed=42)
+        assert obs.shape == (19,)
+        for _ in range(50):
+            action = np.array([0.5, 0, 0, 0], dtype=np.float32)
+            obs, _, terminated, truncated, _ = e.step(action)
+            if terminated or truncated:
+                break
+        e.close()
+
+    def test_dynamics_hover_maintains_altitude(self):
+        e = DroneRacingEnv(num_gates=3, max_steps=200, use_dynamics_model=True)
+        e.reset(seed=42)
+        initial_z = e._drone_pos[2]
+        for _ in range(50):
+            e.step(np.array([0.5, 0, 0, 0], dtype=np.float32))
+        # Should roughly hover (within 2m tolerance for the dynamics model)
+        assert abs(e._drone_pos[2] - initial_z) < 2.0, (
+            f"Altitude drifted too much: {e._drone_pos[2]} vs {initial_z}"
+        )
+        e.close()

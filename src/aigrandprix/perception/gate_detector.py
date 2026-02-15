@@ -34,9 +34,23 @@ class GateDetector:
     - Hybrid approach
     """
 
-    def __init__(self, method: str = "hybrid") -> None:
+    def __init__(self, method: str = "hybrid", config: dict | None = None) -> None:
         self.method = method
         self._model = None
+        if config is not None:
+            self._gate_color_lower = np.array(config.get("gate_color_lower", [0, 100, 100]))
+            self._gate_color_upper = np.array(config.get("gate_color_upper", [10, 255, 255]))
+            self._area_filter = config.get("area_filter", 500)
+            self._focal_length = config.get("focal_length", 500)
+            self._gate_real_size = config.get("gate_real_size", 1.0)
+            self._confidence_scale = config.get("confidence_scale", 5000)
+        else:
+            self._gate_color_lower = np.array([0, 100, 100])
+            self._gate_color_upper = np.array([10, 255, 255])
+            self._area_filter = 500
+            self._focal_length = 500
+            self._gate_real_size = 1.0
+            self._confidence_scale = 5000
 
     def detect(self, image: np.ndarray) -> list[GateDetection]:
         """Detect all visible gates in the image.
@@ -59,17 +73,14 @@ class GateDetector:
         import cv2
 
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        # Gate color range - will be tuned to actual gate colors
-        lower = np.array([0, 100, 100])
-        upper = np.array([10, 255, 255])
-        mask = cv2.inRange(hsv, lower, upper)
+        mask = cv2.inRange(hsv, self._gate_color_lower, self._gate_color_upper)
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         detections = []
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area < 500:  # filter noise
+            if area < self._area_filter:
                 continue
 
             rect = cv2.minAreaRect(contour)
@@ -78,16 +89,18 @@ class GateDetector:
 
             # Rough distance estimation from apparent size
             apparent_size = max(rect[1])
-            gate_real_size = 1.0  # meters, TBD
-            focal_length = 500  # pixels, TBD from camera calibration
-            distance = (gate_real_size * focal_length) / apparent_size if apparent_size > 0 else 999
+            distance = (
+                (self._gate_real_size * self._focal_length) / apparent_size
+                if apparent_size > 0
+                else 999
+            )
 
             detections.append(GateDetection(
                 center_px=center,
                 corners_px=box,
                 distance=distance,
                 normal=np.array([0, 0, 1]),  # placeholder
-                confidence=min(area / 5000, 1.0),
+                confidence=min(area / self._confidence_scale, 1.0),
             ))
 
         return sorted(detections, key=lambda d: d.distance)

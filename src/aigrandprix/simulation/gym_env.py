@@ -12,6 +12,8 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from aigrandprix.utils.math_utils import euler_to_quat, quat_to_euler
+
 
 class DroneRacingEnv(gym.Env):
     """Drone racing Gymnasium environment.
@@ -24,31 +26,63 @@ class DroneRacingEnv(gym.Env):
 
     metadata = {"render_modes": ["human", "rgb_array"]}
 
+    # Fixed normalization scales (shape 19): pos, vel, orient, angular_vel, gate_rel, gate_normal
+    _OBS_SCALES = np.array(
+        [50, 50, 50, 30, 30, 30, 1, 1, 1, 1, 10, 10, 10, 50, 50, 50, 1, 1, 1],
+        dtype=np.float32,
+    )
+
     def __init__(
         self,
         num_gates: int = 5,
         max_steps: int = 2000,
         render_mode: str | None = None,
+        normalize_obs: bool = False,
+        normalize_actions: bool = False,
+        use_dynamics_model: bool = False,
+        config: dict | None = None,
     ) -> None:
         super().__init__()
         self.num_gates = num_gates
         self.max_steps = max_steps
         self.render_mode = render_mode
+        self.normalize_obs = normalize_obs
+        self.normalize_actions = normalize_actions
+        self.use_dynamics_model = use_dynamics_model
 
-        # Action: [thrust, roll_rate, pitch_rate, yaw_rate]
-        self.action_space = spaces.Box(
-            low=np.array([0.0, -8.0, -8.0, -4.0]),
-            high=np.array([1.0, 8.0, 8.0, 4.0]),
-            dtype=np.float32,
-        )
+        # Action space
+        if normalize_actions:
+            self.action_space = spaces.Box(
+                low=-np.ones(4, dtype=np.float32),
+                high=np.ones(4, dtype=np.float32),
+                dtype=np.float32,
+            )
+        else:
+            self.action_space = spaces.Box(
+                low=np.array([0.0, -8.0, -8.0, -4.0]),
+                high=np.array([1.0, 8.0, 8.0, 4.0]),
+                dtype=np.float32,
+            )
 
-        # Observation: [pos(3), vel(3), orient(4), angular_vel(3), next_gate_rel(3), gate_normal(3)]
-        self.observation_space = spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(19,),
-            dtype=np.float32,
-        )
+        # Observation space
+        if normalize_obs:
+            self.observation_space = spaces.Box(
+                low=-np.ones(19, dtype=np.float32),
+                high=np.ones(19, dtype=np.float32),
+                dtype=np.float32,
+            )
+        else:
+            self.observation_space = spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(19,),
+                dtype=np.float32,
+            )
+
+        # Dynamics model (lazy init)
+        self._dynamics = None
+        if use_dynamics_model:
+            self._init_dynamics(config)
 
         self._step_count = 0
         self._current_gate_idx = 0
@@ -59,6 +93,15 @@ class DroneRacingEnv(gym.Env):
         self._drone_angular_vel = np.zeros(3)
         # Euler angles tracked from integrated angular rates (roll, pitch, yaw)
         self._drone_rpy = np.zeros(3)
+
+    def _init_dynamics(self, config: dict | None) -> None:
+        from aigrandprix.control.drone_dynamics import DroneParams, QuadrotorDynamics
+
+        if config and "drone" in config:
+            params = DroneParams.from_config(config["drone"])
+        else:
+            params = DroneParams()
+        self._dynamics = QuadrotorDynamics(params)
 
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
@@ -83,40 +126,19 @@ class DroneRacingEnv(gym.Env):
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         self._step_count += 1
 
-        # Simple physics step (placeholder - will be replaced by actual sim)
-        thrust, roll_r, pitch_r, yaw_r = action
-        dt = 0.02
+        # Denormalize actions if needed
+        if self.normalize_actions:
+            thrust = (action[0] + 1.0) / 2.0
+            roll_r = action[1] * 8.0
+            pitch_r = action[2] * 8.0
+            yaw_r = action[3] * 4.0
+        else:
+            thrust, roll_r, pitch_r, yaw_r = action
 
-        # Integrate angular rates -> Euler angles (roll, pitch, yaw)
-        self._drone_rpy += np.array([roll_r, pitch_r, yaw_r]) * dt
-        # Dampen angles toward zero (aerodynamic restoring moment)
-        self._drone_rpy *= 0.98
-        # Clamp to physically reasonable range
-        self._drone_rpy[0] = np.clip(self._drone_rpy[0], -np.pi / 3, np.pi / 3)  # roll ±60°
-        self._drone_rpy[1] = np.clip(self._drone_rpy[1], -np.pi / 3, np.pi / 3)  # pitch ±60°
-        self._drone_angular_vel = np.array([roll_r, pitch_r, yaw_r])
-
-        # Update quaternion from Euler angles for observation consistency
-        roll, pitch, yaw = self._drone_rpy
-        cr, sr = np.cos(roll / 2), np.sin(roll / 2)
-        cp, sp = np.cos(pitch / 2), np.sin(pitch / 2)
-        cy, sy = np.cos(yaw / 2), np.sin(yaw / 2)
-        self._drone_orient = np.array([
-            cr * cp * cy + sr * sp * sy,  # w
-            sr * cp * cy - cr * sp * sy,  # x
-            cr * sp * cy + sr * cp * sy,  # y
-            cr * cp * sy - sr * sp * cy,  # z
-        ])
-
-        # Simplified dynamics
-        accel = np.array([
-            pitch_r * 0.5,
-            -roll_r * 0.5,
-            (thrust - 0.5) * 20.0 - 9.81,
-        ])
-        self._drone_vel += accel * dt
-        self._drone_vel *= 0.99  # drag
-        self._drone_pos += self._drone_vel * dt
+        if self.use_dynamics_model:
+            self._step_dynamics(thrust, roll_r, pitch_r, yaw_r)
+        else:
+            self._step_simplified(thrust, roll_r, pitch_r, yaw_r)
 
         # Check gate passage
         reward = 0.0
@@ -152,6 +174,56 @@ class DroneRacingEnv(gym.Env):
 
         return self._get_obs(), reward, terminated, truncated, info
 
+    def _step_simplified(
+        self, thrust: float, roll_r: float, pitch_r: float, yaw_r: float
+    ) -> None:
+        """Original simplified physics — byte-for-byte identical to pre-refactor."""
+        dt = 0.02
+
+        # Integrate angular rates -> Euler angles (roll, pitch, yaw)
+        self._drone_rpy += np.array([roll_r, pitch_r, yaw_r]) * dt
+        # Dampen angles toward zero (aerodynamic restoring moment)
+        self._drone_rpy *= 0.98
+        # Clamp to physically reasonable range
+        self._drone_rpy[0] = np.clip(self._drone_rpy[0], -np.pi / 3, np.pi / 3)  # roll ±60°
+        self._drone_rpy[1] = np.clip(self._drone_rpy[1], -np.pi / 3, np.pi / 3)  # pitch ±60°
+        self._drone_angular_vel = np.array([roll_r, pitch_r, yaw_r])
+
+        # Update quaternion from Euler angles for observation consistency
+        self._drone_orient = euler_to_quat(self._drone_rpy)
+
+        # Simplified dynamics
+        accel = np.array([
+            pitch_r * 0.5,
+            -roll_r * 0.5,
+            (thrust - 0.5) * 20.0 - 9.81,
+        ])
+        self._drone_vel += accel * dt
+        self._drone_vel *= 0.99  # drag
+        self._drone_pos += self._drone_vel * dt
+
+    def _step_dynamics(
+        self, thrust: float, roll_r: float, pitch_r: float, yaw_r: float
+    ) -> None:
+        """Full Newton-Euler dynamics via QuadrotorDynamics."""
+        from aigrandprix.control.drone_controller import DroneState
+
+        dt = 0.02
+        state = DroneState(
+            position=self._drone_pos.copy(),
+            velocity=self._drone_vel.copy(),
+            orientation=self._drone_orient.copy(),
+            angular_velocity=self._drone_angular_vel.copy(),
+        )
+        motor_thrusts = self._dynamics.command_to_motor_thrusts(thrust, roll_r, pitch_r, yaw_r)
+        new_state = self._dynamics.step(state, motor_thrusts, dt)
+
+        self._drone_pos = new_state.position
+        self._drone_vel = new_state.velocity
+        self._drone_orient = new_state.orientation
+        self._drone_angular_vel = new_state.angular_velocity
+        self._drone_rpy = quat_to_euler(new_state.orientation)
+
     def _get_obs(self) -> np.ndarray:
         if self._current_gate_idx < len(self._gates):
             gate_pos = self._gates[self._current_gate_idx]
@@ -169,6 +241,9 @@ class DroneRacingEnv(gym.Env):
             gate_rel,
             gate_normal,
         ]).astype(np.float32)
+
+        if self.normalize_obs:
+            obs = np.clip(obs / self._OBS_SCALES, -1.0, 1.0)
 
         return obs
 

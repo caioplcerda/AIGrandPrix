@@ -26,6 +26,18 @@ class RaceConfig:
     replan_interval: float = 0.5  # seconds between replanning
     control_dt: float = 0.01  # control loop timestep
 
+    @classmethod
+    def from_config(cls, config: dict) -> RaceConfig:
+        race = config.get("race", {})
+        perception = config.get("perception", {})
+        return cls(
+            max_speed=race.get("max_speed", 15.0),
+            max_accel=race.get("max_accel", 10.0),
+            detection_method=perception.get("method", "hybrid"),
+            replan_interval=race.get("replan_interval", 0.5),
+            control_dt=race.get("control_dt", 0.01),
+        )
+
 
 class RacingAgent:
     """Main autonomous racing agent.
@@ -34,14 +46,30 @@ class RacingAgent:
     fly through gates as fast as possible.
     """
 
-    def __init__(self, config: RaceConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: RaceConfig | None = None,
+        full_config: dict | None = None,
+    ) -> None:
         self.config = config or RaceConfig()
-        self.detector = GateDetector(method=self.config.detection_method)
+
+        perception_cfg = full_config.get("perception", {}) if full_config else None
+        planning_cfg = full_config.get("planning", {}) if full_config else None
+        control_cfg = full_config.get("control", {}) if full_config else None
+
+        self.detector = GateDetector(
+            method=self.config.detection_method,
+            config=perception_cfg,
+        )
         self.planner = PathPlanner(
             max_speed=self.config.max_speed,
             max_accel=self.config.max_accel,
+            config=planning_cfg,
         )
-        self.controller = DroneController(dt=self.config.control_dt)
+        self.controller = DroneController(
+            dt=self.config.control_dt,
+            config=control_cfg,
+        )
 
         self._trajectory = []
         self._trajectory_idx = 0

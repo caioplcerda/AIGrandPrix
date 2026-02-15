@@ -38,9 +38,22 @@ class TrajectoryPoint:
 class PathPlanner:
     """Plans optimal flight paths through gate sequences."""
 
-    def __init__(self, max_speed: float = 15.0, max_accel: float = 10.0) -> None:
+    def __init__(
+        self,
+        max_speed: float = 15.0,
+        max_accel: float = 10.0,
+        config: dict | None = None,
+    ) -> None:
         self.max_speed = max_speed
         self.max_accel = max_accel
+        if config is not None:
+            self._approach_distance = config.get("approach_distance", 1.5)
+            self._exit_distance = config.get("exit_distance", 1.0)
+            self._trajectory_dt = config.get("trajectory_dt", 0.02)
+        else:
+            self._approach_distance = 1.5
+            self._exit_distance = 1.0
+            self._trajectory_dt = 0.02
 
     def plan_through_gates(
         self,
@@ -65,12 +78,12 @@ class PathPlanner:
         waypoints = [start_pos]
         for gate in gates:
             # Add approach point (before gate)
-            approach = gate.position - gate.normal * 1.5
+            approach = gate.position - gate.normal * self._approach_distance
             waypoints.append(approach)
             # Gate center
             waypoints.append(gate.position)
             # Exit point (after gate)
-            exit_pt = gate.position + gate.normal * 1.0
+            exit_pt = gate.position + gate.normal * self._exit_distance
             waypoints.append(exit_pt)
 
         waypoints_arr = np.array(waypoints)

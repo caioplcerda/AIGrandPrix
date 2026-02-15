@@ -27,10 +27,32 @@ planning:
   exit_distance: 1.0       # meters after gate for exit waypoint
   trajectory_dt: 0.02      # trajectory sampling interval
 
+drone:
+  mass: 0.75
+  arm_length: 0.125
+  Ixx: 0.0025
+  Iyy: 0.0025
+  Izz: 0.0045
+  thrust_coeff: 1.0e-5
+  drag_coeff: 1.0e-7
+  motor_max_rpm: 25000
+  linear_drag: 0.01
+  gravity: 9.81
+  motor_time_constant: 0.02
+
+normalization:
+  pos_bound: 50.0
+  vel_bound: 30.0
+  angular_vel_bound: 10.0
+  gate_rel_bound: 50.0
+
 simulation:
   num_gates: 5
   max_steps: 2000
   render: false
+  use_dynamics_model: false
+  normalize_obs: false
+  normalize_actions: false
 
 training:
   algorithm: "PPO"

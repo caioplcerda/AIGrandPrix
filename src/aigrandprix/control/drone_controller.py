@@ -15,6 +15,8 @@ from enum import Enum
 
 import numpy as np
 
+from aigrandprix.utils.math_utils import quat_to_euler
+
 
 class ControlLevel(Enum):
     """Control API level matching typical drone racing platforms."""
@@ -41,8 +43,7 @@ class DroneState:
     @property
     def yaw(self) -> float:
         """Extract yaw angle from quaternion."""
-        w, x, y, z = self.orientation
-        return float(np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z)))
+        return float(quat_to_euler(self.orientation)[2])
 
 
 @dataclass
@@ -96,16 +97,34 @@ class DroneController:
     and the eventual DCL competition platform.
     """
 
-    def __init__(self, gains: PIDGains | None = None, dt: float = 0.01) -> None:
-        self.gains = gains or PIDGains()
+    def __init__(
+        self,
+        gains: PIDGains | None = None,
+        dt: float = 0.01,
+        config: dict | None = None,
+    ) -> None:
+        if config is not None and gains is None:
+            pid_cfg = config.get("pid", {})
+            if pid_cfg:
+                self.gains = PIDGains(
+                    kp=np.array(pid_cfg.get("kp", [6.0, 6.0, 8.0])),
+                    ki=np.array(pid_cfg.get("ki", [0.1, 0.1, 0.2])),
+                    kd=np.array(pid_cfg.get("kd", [3.5, 3.5, 4.5])),
+                )
+            else:
+                self.gains = PIDGains()
+            self.max_rate = config.get("max_rate", 8.0)
+            self.max_thrust = config.get("max_thrust", 1.0)
+        else:
+            self.gains = gains or PIDGains()
+            self.max_rate = 8.0
+            self.max_thrust = 1.0
         self.dt = dt
         self._integral_error = np.zeros(3)
         self._prev_error = np.zeros(3)
         self._vel_integral_error = np.zeros(3)
         self._vel_prev_error = np.zeros(3)
         self.max_speed = 15.0  # m/s
-        self.max_thrust = 1.0
-        self.max_rate = 8.0  # rad/s
 
     def track_position(self, state: DroneState, target_pos: np.ndarray) -> ControlCommand:
         """PID position controller -> low-level commands."""
