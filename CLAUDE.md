@@ -125,3 +125,33 @@ src/aigrandprix/
 - Integration tests for full pipeline
 - Benchmark tests for lap timing
 - Sim validation against reference trajectories
+
+## Phase 2 Benchmarks — Trajectory Planning
+
+Comparison of trajectory methods on a 5-gate course with turns and altitude changes (max_speed=15, max_accel=10).
+
+### Trajectory Quality (plan_through_gates)
+
+| Method | Duration | Avg Spd | Max Acc | Path Len | Max Jerk | Avg Jerk | Solve Time |
+|--------|----------|---------|---------|----------|----------|----------|------------|
+| cubic_spline | 3.56s | 10.62 | 323 | 38.0m | 4,801 | 362 | 3ms |
+| min_jerk | 4.32s | 9.03 | 319 | 37.7m | 10,918 | 841 | 9ms |
+| min_snap | 4.32s | 10.00 | 287 | 46.5m | 5,789 | 594 | 15ms |
+| min_snap + racing_line | 4.20s | 9.93 | 285 | 44.8m | 5,791 | 592 | 15ms |
+| min_snap + RL + time_alloc | 6.92s | 5.46 | **10.2** | **37.0m** | **55** | **25** | 97s |
+
+### Sim Flight (5 gates, 3 seeds, max_speed=12)
+
+| Method | Avg Gates | Avg Spd | Completed | Crashed |
+|--------|-----------|---------|-----------|---------|
+| cubic_spline (baseline) | 4.0 | 1.12 | 0/3 | 0/3 |
+| min_snap | 4.0 | 1.60 | 0/3 | 1/3 |
+| min_snap + racing_line | 2.0 | 1.90 | 0/3 | 1/3 |
+
+### Key Findings
+
+1. **Time allocation is the smoothness game-changer**: max jerk drops 100x (5,789 -> 55), max accel drops 28x (287 -> 10). Solve time (~97s) needs optimization for real-time use.
+2. **Min-snap reduces peak acceleration** vs cubic_spline (287 vs 323) — the intended physical benefit.
+3. **Racing line shortens path**: 44.8m vs 46.5m for plain min_snap.
+4. **Sim performance is bottlenecked by PID controller**, not trajectory quality. Aggressive polynomial accelerations push the drone off-track — controller tuning is the next priority.
+5. **Replanning always uses cubic_spline** for real-time speed; trajectory method only affects initial plan before first replan at 0.5s.

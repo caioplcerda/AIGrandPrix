@@ -68,6 +68,7 @@ def run_episode(
     num_gates: int = 5,
     max_steps: int = 2000,
     max_speed: float = 12.0,
+    full_config: dict | None = None,
 ) -> EpisodeResult:
     """Run a single episode with the racing agent."""
     env = DroneRacingEnv(num_gates=num_gates, max_steps=max_steps)
@@ -75,7 +76,8 @@ def run_episode(
     gates = _build_gates(env)
     gate_positions = np.array([g.position for g in gates])
 
-    agent = RacingAgent(RaceConfig(max_speed=max_speed, control_dt=0.02))
+    race_cfg = RaceConfig(max_speed=max_speed, control_dt=0.02)
+    agent = RacingAgent(race_cfg, full_config=full_config)
     dummy_image = np.zeros((480, 640, 3), dtype=np.uint8)
 
     positions = [env._drone_pos.copy()]
