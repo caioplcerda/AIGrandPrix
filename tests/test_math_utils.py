@@ -14,6 +14,7 @@ from aigrandprix.utils.math_utils import (
     quat_rotate,
     quat_to_euler,
     quat_to_rotation_matrix,
+    skew,
 )
 
 
@@ -75,6 +76,16 @@ class TestRotationMatrix:
         R = quat_to_rotation_matrix(q)
         v_mat = R @ v
         np.testing.assert_allclose(v_quat, v_mat, atol=1e-12)
+
+
+class TestSkewMatrix:
+    def test_skew_matrix(self):
+        """skew(a) @ b should equal np.cross(a, b)."""
+        rng = np.random.default_rng(42)
+        for _ in range(10):
+            a = rng.standard_normal(3)
+            b = rng.standard_normal(3)
+            np.testing.assert_allclose(skew(a) @ b, np.cross(a, b), atol=1e-12)
 
 
 class TestQuatDerivative:

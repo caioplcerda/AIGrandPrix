@@ -1,11 +1,16 @@
-"""Tests for gate detection (color-based pipeline)."""
+"""Tests for gate detection (color-based pipeline), CNN, and tracking."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from aigrandprix.perception.gate_detector import GateDetection, GateDetector
+from aigrandprix.perception.gate_detector import (
+    GateDetection,
+    GateDetector,
+    GateTrack,
+    GateTracker,
+)
 
 
 def _make_blank_image(h: int = 480, w: int = 640) -> np.ndarray:
@@ -26,6 +31,18 @@ def _draw_red_rect(
     x1, x2 = max(cx - half_w, 0), min(cx + half_w, img.shape[1])
     img[y1:y2, x1:x2] = [0, 0, 255]  # pure red in BGR
     return img
+
+
+def _make_detection(pos: np.ndarray, gate_id: int = 0) -> GateDetection:
+    """Helper to create a GateDetection with given 3D hint."""
+    return GateDetection(
+        center_px=(320, 240),
+        corners_px=np.zeros((4, 2)),
+        distance=float(np.linalg.norm(pos)),
+        normal=np.array([0, 0, 1]),
+        confidence=0.9,
+        gate_id=gate_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -106,12 +123,12 @@ class TestColorDetection:
 
 
 # ---------------------------------------------------------------------------
-# CNN / Hybrid stubs
+# CNN / Hybrid
 # ---------------------------------------------------------------------------
 
-class TestCNNStub:
-    def test_cnn_returns_empty(self):
-        """CNN stub should return empty list (not yet implemented)."""
+class TestCNN:
+    def test_cnn_no_model_returns_empty(self):
+        """CNN without weights file should return empty list."""
         img = _make_blank_image()
         detector = GateDetector(method="cnn")
         assert detector.detect(img) == []
@@ -123,6 +140,114 @@ class TestCNNStub:
         detector = GateDetector(method="hybrid")
         detections = detector.detect(img)
         assert len(detections) >= 1, "Hybrid should fallback to color detection"
+
+    def test_centernet_forward_shape(self):
+        """CenterNet model forward pass should produce correct output shapes."""
+        import torch
+        from aigrandprix.perception.cnn_model import GateCenterNet
+
+        model = GateCenterNet(input_size=(320, 320))
+        x = torch.randn(1, 3, 320, 320)
+        out = model(x)
+        assert out["heatmap"].shape == (1, 1, 40, 40)
+        assert out["size"].shape == (1, 2, 40, 40)
+        assert out["corners"].shape == (1, 8, 40, 40)
+
+    def test_cnn_config_loading(self):
+        """Verify CNN config params are stored correctly."""
+        cfg = {
+            "cnn": {
+                "backend": "custom",
+                "model_path": "/tmp/test.pt",
+                "confidence_threshold": 0.7,
+                "nms_threshold": 0.3,
+                "input_size": [256, 256],
+            }
+        }
+        detector = GateDetector(method="cnn", config=cfg)
+        assert detector._cnn_backend == "custom"
+        assert detector._cnn_model_path == "/tmp/test.pt"
+        assert detector._cnn_confidence == 0.7
+        assert detector._cnn_nms == 0.3
+        assert detector._cnn_input_size == (256, 256)
+
+    def test_hybrid_still_falls_back(self):
+        """Hybrid without trained model → color detection."""
+        img = _make_blank_image()
+        img = _draw_red_rect(img, 320, 240, half_w=50, half_h=50)
+        detector = GateDetector(method="hybrid", config={"cnn": {"backend": "custom"}})
+        detections = detector.detect(img)
+        assert len(detections) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Temporal tracking
+# ---------------------------------------------------------------------------
+
+class TestGateTracker:
+    def test_tracker_creates_tracks(self):
+        """Two detections → two tracks (after min_hits)."""
+        tracker = GateTracker({"min_hits": 1})
+        det1 = _make_detection(np.array([1.0, 0, 5]))
+        det2 = _make_detection(np.array([-1.0, 0, 5]))
+        tracks = tracker.update(
+            [(det1, np.array([1.0, 0, 5])), (det2, np.array([-1.0, 0, 5]))],
+            timestamp=0.0,
+        )
+        assert len(tracks) == 2
+
+    def test_tracker_matches_across_frames(self):
+        """Same gate seen twice → 1 track with 2 hits."""
+        tracker = GateTracker({"min_hits": 1})
+        pos = np.array([0.0, 0.0, 5.0])
+        det = _make_detection(pos)
+        tracker.update([(det, pos.copy())], timestamp=0.0)
+        tracks = tracker.update([(det, pos.copy())], timestamp=0.01)
+        assert len(tracks) == 1
+        assert tracks[0].hits == 2
+
+    def test_tracker_prunes_stale(self):
+        """Track should be removed after max_age without detection."""
+        tracker = GateTracker({"max_age": 0.1, "min_hits": 1})
+        pos = np.array([0.0, 0.0, 5.0])
+        det = _make_detection(pos)
+        tracker.update([(det, pos.copy())], timestamp=0.0)
+        # No detection, time advances beyond max_age
+        tracks = tracker.update([], timestamp=0.5)
+        assert len(tracks) == 0
+
+    def test_tracker_min_hits(self):
+        """Track not active until min_hits reached."""
+        tracker = GateTracker({"min_hits": 3})
+        pos = np.array([0.0, 0.0, 5.0])
+        det = _make_detection(pos)
+        # First frame: 1 hit < 3
+        tracks = tracker.update([(det, pos.copy())], timestamp=0.0)
+        assert len(tracks) == 0
+        # Second: 2 hits < 3
+        tracks = tracker.update([(det, pos.copy())], timestamp=0.01)
+        assert len(tracks) == 0
+        # Third: 3 hits >= 3
+        tracks = tracker.update([(det, pos.copy())], timestamp=0.02)
+        assert len(tracks) == 1
+
+    def test_tracker_reset(self):
+        """Reset should clear all tracks."""
+        tracker = GateTracker({"min_hits": 1})
+        pos = np.array([0.0, 0.0, 5.0])
+        det = _make_detection(pos)
+        tracker.update([(det, pos.copy())], timestamp=0.0)
+        tracker.reset()
+        assert tracker.get_predicted_positions(0.0) == []
+
+    def test_detect_and_track_without_tracker(self):
+        """detect_and_track without tracker returns empty tracks."""
+        img = _make_blank_image()
+        img = _draw_red_rect(img, 320, 240, half_w=50, half_h=50)
+        detector = GateDetector(method="color")
+        dets, tracks = detector.detect_and_track(img, timestamp=0.0)
+        assert len(dets) >= 1
+        assert tracks == []
 
 
 # ---------------------------------------------------------------------------

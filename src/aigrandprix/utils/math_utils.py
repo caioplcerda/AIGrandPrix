@@ -85,6 +85,15 @@ def quat_to_rotation_matrix(q: np.ndarray) -> np.ndarray:
     ])
 
 
+def skew(v: np.ndarray) -> np.ndarray:
+    """3D vector -> 3x3 skew-symmetric matrix for cross product."""
+    return np.array([
+        [0, -v[2], v[1]],
+        [v[2], 0, -v[0]],
+        [-v[1], v[0], 0],
+    ])
+
+
 def angular_vel_to_quat_derivative(q: np.ndarray, omega: np.ndarray) -> np.ndarray:
     """Compute quaternion time derivative: q_dot = 0.5 * q (x) [0, omega]."""
     omega_quat = np.array([0.0, omega[0], omega[1], omega[2]])

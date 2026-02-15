@@ -71,6 +71,26 @@ class RacingAgent:
             config=control_cfg,
         )
 
+        # Optional Phase 1 perception modules (None when not configured)
+        self.depth_estimator = None
+        self.state_estimator = None
+
+        if full_config:
+            p_cfg = full_config.get("perception", {})
+            # Depth estimator: create when camera or gate dimensions are specified
+            if p_cfg.get("camera") or p_cfg.get("gate_real_width"):
+                from aigrandprix.perception.depth_estimation import DepthEstimator
+                self.depth_estimator = DepthEstimator(
+                    gate_width=p_cfg.get("gate_real_width", 1.0),
+                    gate_height=p_cfg.get("gate_real_height", 1.0),
+                    config=p_cfg,
+                )
+            # State estimator: create when explicitly enabled
+            se_cfg = p_cfg.get("state_estimator", {})
+            if se_cfg.get("enabled", False):
+                from aigrandprix.perception.state_estimator import StateEstimator
+                self.state_estimator = StateEstimator(config=se_cfg)
+
         self._trajectory = []
         self._trajectory_idx = 0
         self._gates_passed = 0
@@ -96,8 +116,28 @@ class RacingAgent:
         Returns:
             Control command for the drone
         """
-        # Detect gates from vision
-        detections = self.detector.detect(image)
+        # Use state estimator if available
+        active_state = state
+        if self.state_estimator is not None:
+            self.state_estimator.predict(
+                accel_meas=np.array([0.0, 0.0, 9.81]),  # placeholder IMU
+                gyro_meas=state.angular_velocity,
+                dt=self.config.control_dt,
+            )
+            active_state = self.state_estimator.get_state()
+
+        # Detect gates with tracking if available
+        if self.depth_estimator is not None and hasattr(self.detector, "detect_and_track"):
+            detections, tracks = self.detector.detect_and_track(
+                image, elapsed_time, self.depth_estimator,
+            )
+            # Refine detection distances via PnP
+            for det in detections:
+                pose = self.depth_estimator.estimate_pose_from_detection(det)
+                if pose is not None:
+                    det.distance = pose.distance
+        else:
+            detections = self.detector.detect(image)
 
         # Decide if we need to replan
         should_replan = (
@@ -109,8 +149,8 @@ class RacingAgent:
         if should_replan and known_gates:
             remaining_gates = known_gates[self._gates_passed:]
             self._trajectory = self.planner.replan_from_current(
-                current_pos=state.position,
-                current_vel=state.velocity,
+                current_pos=active_state.position,
+                current_vel=active_state.velocity,
                 remaining_gates=remaining_gates,
             )
             self._trajectory_idx = 0
@@ -120,7 +160,7 @@ class RacingAgent:
         if self._trajectory and self._trajectory_idx < len(self._trajectory):
             target = self._trajectory[self._trajectory_idx]
             command = self.controller.track_trajectory_point(
-                state,
+                active_state,
                 target_pos=target.position,
                 target_vel=target.velocity,
                 target_accel=target.acceleration,
@@ -128,11 +168,13 @@ class RacingAgent:
             # Compute yaw to face next gate
             if self._gates_passed < len(known_gates or []):
                 next_gate = known_gates[self._gates_passed]
-                command.yaw_rate = self.controller.compute_yaw_rate(state, next_gate.position)
+                command.yaw_rate = self.controller.compute_yaw_rate(
+                    active_state, next_gate.position,
+                )
             self._trajectory_idx += 1
         else:
             # Emergency: hold position
-            command = self.controller.track_position(state, state.position)
+            command = self.controller.track_position(active_state, active_state.position)
 
         return command
 
@@ -147,3 +189,10 @@ class RacingAgent:
         self._gates_passed = 0
         self._last_replan_time = 0.0
         self.controller.reset()
+        if self.state_estimator is not None:
+            self.state_estimator.reset(DroneState(
+                position=np.zeros(3),
+                velocity=np.zeros(3),
+                orientation=np.array([1.0, 0.0, 0.0, 0.0]),
+                angular_velocity=np.zeros(3),
+            ))

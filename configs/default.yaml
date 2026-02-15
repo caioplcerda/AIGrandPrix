@@ -13,6 +13,34 @@ perception:
   image_height: 480
   gate_color_lower: [0, 100, 100]    # HSV lower bound
   gate_color_upper: [10, 255, 255]   # HSV upper bound
+  gate_real_width: 1.0
+  gate_real_height: 1.0
+  camera:
+    fx: 320.0
+    fy: 320.0
+    cx: 320.0
+    cy: 240.0
+  cnn:
+    backend: "custom"
+    model_path: null
+    confidence_threshold: 0.5
+    nms_threshold: 0.4
+    input_size: [320, 320]
+  tracking:
+    enabled: false
+    max_age: 0.5
+    min_hits: 3
+    match_threshold: 2.0
+    process_noise: 0.01
+    measurement_noise: 0.5
+  state_estimator:
+    enabled: false
+    process_noise_pos: 0.1
+    process_noise_vel: 1.0
+    process_noise_orient: 0.01
+    process_noise_gyro: 0.1
+    process_noise_accel_bias: 0.001
+    measurement_noise_pos: 0.5
 
 control:
   pid:
