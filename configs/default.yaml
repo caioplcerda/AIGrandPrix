@@ -54,6 +54,18 @@ planning:
   approach_distance: 1.5   # meters before gate for approach waypoint
   exit_distance: 1.0       # meters after gate for exit waypoint
   trajectory_dt: 0.02      # trajectory sampling interval
+  trajectory_method: "min_snap"  # cubic_spline | min_jerk | min_snap
+  racing_line:
+    enabled: true
+    gate_margin: 0.15        # meters from gate edge
+    curvature_weight: 2.0    # penalty for curvature at waypoints
+  time_allocation:
+    enabled: true
+    min_segment_time: 0.1    # seconds
+    max_iterations: 50
+    tolerance: 0.01
+  min_snap:
+    regularization: 1.0e-6
 
 drone:
   mass: 0.75

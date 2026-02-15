@@ -2,16 +2,20 @@
 
 Plans optimal trajectories through gate sequences using:
 - Minimum jerk trajectory generation for smooth flight
+- Minimum snap trajectory for race-optimal flight
 - Time-optimal trajectory planning for speed
 - Waypoint interpolation with velocity constraints
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
 from scipy.interpolate import CubicSpline
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -50,10 +54,18 @@ class PathPlanner:
             self._approach_distance = config.get("approach_distance", 1.5)
             self._exit_distance = config.get("exit_distance", 1.0)
             self._trajectory_dt = config.get("trajectory_dt", 0.02)
+            self._trajectory_method = config.get("trajectory_method", "min_snap")
+            self._racing_line_config = config.get("racing_line", {})
+            self._time_alloc_config = config.get("time_allocation", {})
+            self._min_snap_config = config.get("min_snap", {})
         else:
             self._approach_distance = 1.5
             self._exit_distance = 1.0
             self._trajectory_dt = 0.02
+            self._trajectory_method = "cubic_spline"
+            self._racing_line_config = {}
+            self._time_alloc_config = {}
+            self._min_snap_config = {}
 
     def plan_through_gates(
         self,
@@ -74,32 +86,61 @@ class PathPlanner:
         if start_vel is None:
             start_vel = np.zeros(3)
 
-        # Build waypoints: start + gate centers + approach/exit offsets
+        # Racing line optimization (if enabled)
+        planning_gates = gates
+        if self._racing_line_config.get("enabled", False):
+            from aigrandprix.planning.race_strategy import RacingLineOptimizer
+
+            optimizer = RacingLineOptimizer(
+                gate_margin=self._racing_line_config.get("gate_margin", 0.15),
+                curvature_weight=self._racing_line_config.get("curvature_weight", 2.0),
+            )
+            planning_gates = optimizer.optimize_gates(gates, start_pos)
+
+        waypoints_arr = self._build_waypoints(planning_gates, start_pos)
+
+        # Dispatch to selected trajectory method
+        method = self._trajectory_method
+        if method == "min_snap":
+            return self._generate_min_snap_trajectory(waypoints_arr, start_vel)
+        elif method == "min_jerk":
+            return self._generate_min_jerk_trajectory(waypoints_arr, start_vel)
+        else:
+            return self._generate_cubic_spline_trajectory(waypoints_arr, start_vel)
+
+    def _build_waypoints(
+        self,
+        gates: list[Gate],
+        start_pos: np.ndarray,
+    ) -> np.ndarray:
+        """Build waypoint array from start position and gate sequence."""
         waypoints = [start_pos]
         for gate in gates:
-            # Add approach point (before gate)
             approach = gate.position - gate.normal * self._approach_distance
             waypoints.append(approach)
-            # Gate center
             waypoints.append(gate.position)
-            # Exit point (after gate)
             exit_pt = gate.position + gate.normal * self._exit_distance
             waypoints.append(exit_pt)
+        return np.array(waypoints)
 
-        waypoints_arr = np.array(waypoints)
-        return self._generate_smooth_trajectory(waypoints_arr, start_vel)
+    def _estimate_segment_times(self, waypoints: np.ndarray) -> np.ndarray:
+        """Estimate segment durations from distances and max speed."""
+        diffs = np.diff(waypoints, axis=0)
+        distances = np.linalg.norm(diffs, axis=1)
+        # Use a fraction of max speed as average segment speed
+        avg_speed = max(self.max_speed * 0.6, 1.0)
+        times = distances / avg_speed
+        # Enforce minimum segment time
+        times = np.maximum(times, 0.1)
+        return times
 
-    def _generate_smooth_trajectory(
+    def _generate_cubic_spline_trajectory(
         self,
         waypoints: np.ndarray,
         start_vel: np.ndarray,
         dt: float = 0.02,
     ) -> list[TrajectoryPoint]:
-        """Generate a smooth trajectory through waypoints using cubic splines.
-
-        Uses distance-parameterized spline interpolation for natural speed profiles.
-        """
-        # Compute cumulative distance along waypoints
+        """Generate a smooth trajectory through waypoints using cubic splines."""
         diffs = np.diff(waypoints, axis=0)
         segment_lengths = np.linalg.norm(diffs, axis=1)
         cumulative_dist = np.concatenate([[0], np.cumsum(segment_lengths)])
@@ -108,24 +149,19 @@ class PathPlanner:
         if total_dist < 0.01:
             return []
 
-        # Estimate total time based on average speed
         avg_speed = min(self.max_speed * 0.7, total_dist / 2.0)
         total_time = total_dist / max(avg_speed, 0.1)
-
-        # Normalize distances to time parameter
         time_params = cumulative_dist / total_dist * total_time
 
-        # Fit cubic spline for each axis
         splines = []
         for axis in range(3):
             cs = CubicSpline(
                 time_params,
                 waypoints[:, axis],
-                bc_type=((1, start_vel[axis]), (1, 0.0)),  # velocity BCs
+                bc_type=((1, start_vel[axis]), (1, 0.0)),
             )
             splines.append(cs)
 
-        # Sample trajectory
         trajectory = []
         t = 0.0
         while t <= total_time:
@@ -133,7 +169,6 @@ class PathPlanner:
             vel = np.array([s(t, 1) for s in splines])
             acc = np.array([s(t, 2) for s in splines])
 
-            # Enforce speed limit
             speed = np.linalg.norm(vel)
             if speed > self.max_speed:
                 vel = vel / speed * self.max_speed
@@ -148,6 +183,94 @@ class PathPlanner:
 
         return trajectory
 
+    def _generate_min_jerk_trajectory(
+        self,
+        waypoints: np.ndarray,
+        start_vel: np.ndarray,
+    ) -> list[TrajectoryPoint]:
+        """Generate trajectory using minimum-jerk polynomial solver."""
+        from aigrandprix.planning.trajectory_opt import (
+            MinJerkSolver,
+            TimeAllocator,
+            sample_trajectory,
+        )
+
+        segment_times = self._estimate_segment_times(waypoints)
+
+        # Time allocation optimization
+        if self._time_alloc_config.get("enabled", False):
+            solver = MinJerkSolver()
+            allocator = TimeAllocator(
+                min_segment_time=self._time_alloc_config.get("min_segment_time", 0.1),
+                max_iterations=self._time_alloc_config.get("max_iterations", 50),
+                tolerance=self._time_alloc_config.get("tolerance", 0.01),
+            )
+            segment_times = allocator.optimize(
+                waypoints, segment_times,
+                max_velocity=self.max_speed,
+                max_acceleration=self.max_accel,
+                solver=solver,
+                start_vel=start_vel,
+            )
+
+        try:
+            solver = MinJerkSolver()
+            segments = solver.solve_trajectory(
+                waypoints, segment_times, start_vel=start_vel,
+            )
+            return sample_trajectory(segments, self._trajectory_dt, self.max_speed)
+        except np.linalg.LinAlgError:
+            logger.warning("MinJerk solver failed, falling back to cubic spline")
+            return self._generate_cubic_spline_trajectory(waypoints, start_vel)
+
+    def _generate_min_snap_trajectory(
+        self,
+        waypoints: np.ndarray,
+        start_vel: np.ndarray,
+    ) -> list[TrajectoryPoint]:
+        """Generate trajectory using minimum-snap polynomial solver."""
+        from aigrandprix.planning.trajectory_opt import (
+            MinJerkSolver,
+            MinSnapSolver,
+            TimeAllocator,
+            sample_trajectory,
+        )
+
+        segment_times = self._estimate_segment_times(waypoints)
+
+        # Time allocation optimization
+        if self._time_alloc_config.get("enabled", False):
+            solver_for_alloc: MinJerkSolver | MinSnapSolver = MinSnapSolver(
+                regularization=self._min_snap_config.get("regularization", 1e-6),
+            )
+            allocator = TimeAllocator(
+                min_segment_time=self._time_alloc_config.get("min_segment_time", 0.1),
+                max_iterations=self._time_alloc_config.get("max_iterations", 50),
+                tolerance=self._time_alloc_config.get("tolerance", 0.01),
+            )
+            try:
+                segment_times = allocator.optimize(
+                    waypoints, segment_times,
+                    max_velocity=self.max_speed,
+                    max_acceleration=self.max_accel,
+                    solver=solver_for_alloc,
+                    start_vel=start_vel,
+                )
+            except np.linalg.LinAlgError:
+                logger.warning("Time allocation with min-snap failed, using initial times")
+
+        try:
+            solver = MinSnapSolver(
+                regularization=self._min_snap_config.get("regularization", 1e-6),
+            )
+            segments = solver.solve_trajectory(
+                waypoints, segment_times, start_vel=start_vel,
+            )
+            return sample_trajectory(segments, self._trajectory_dt, self.max_speed)
+        except np.linalg.LinAlgError:
+            logger.warning("MinSnap solver failed, falling back to min-jerk")
+            return self._generate_min_jerk_trajectory(waypoints, start_vel)
+
     def replan_from_current(
         self,
         current_pos: np.ndarray,
@@ -156,6 +279,14 @@ class PathPlanner:
     ) -> list[TrajectoryPoint]:
         """Replan trajectory from current state to remaining gates.
 
-        Used for online replanning when deviating from planned path.
+        Uses cubic spline for speed (real-time replanning) unless configured otherwise.
         """
-        return self.plan_through_gates(remaining_gates, current_pos, current_vel)
+        # Save and override method for fast replanning
+        saved_method = self._trajectory_method
+        if self._trajectory_method != "cubic_spline":
+            self._trajectory_method = "cubic_spline"
+
+        result = self.plan_through_gates(remaining_gates, current_pos, current_vel)
+
+        self._trajectory_method = saved_method
+        return result
