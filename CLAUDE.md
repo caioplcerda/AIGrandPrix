@@ -155,3 +155,61 @@ Comparison of trajectory methods on a 5-gate course with turns and altitude chan
 3. **Racing line shortens path**: 44.8m vs 46.5m for plain min_snap.
 4. **Sim performance is bottlenecked by PID controller**, not trajectory quality. Aggressive polynomial accelerations push the drone off-track — controller tuning is the next priority.
 5. **Replanning always uses cubic_spline** for real-time speed; trajectory method only affects initial plan before first replan at 0.5s.
+
+## Phase 3 Results — Control System
+
+### Bug Fix: `_accel_to_command` Thrust Mapping
+
+The Phase 2 bottleneck was a **critical thrust mapping bug**. The simplified physics uses `accel_z = (thrust - 0.5) * 20 - 9.81`, requiring thrust=0.99 for hover. The old controller computed `thrust = norm(accel + gravity) / 20`, which gave thrust=0.49 for hover — the drone effectively free-fell.
+
+**Fix**: Added `physics_mode` dispatch in `DroneController`:
+- `_accel_to_command_simplified` — exact inverse of gym_env: `thrust = (accel_z + 9.81) / 20 + 0.5`, `pitch_rate = accel_x * 2`, `roll_rate = -accel_y * 2`
+- `_accel_to_command_full` — corrected attitude-based mapping: `thrust = norm(total_accel) / (2 * 9.81)` (hover = 0.50)
+
+### Simplified Physics Constraints
+
+The simplified physics has highly asymmetric z-axis control:
+- **Max climb**: thrust=1.0 → accel_z = +0.19 m/s² (very slow)
+- **Max descent**: thrust=0.0 → accel_z = -19.81 m/s² (free-fall)
+- **Lateral**: pitch/roll rate ±8 → accel_x/y = ±4.0 m/s² (decoupled from z)
+
+Trajectory feedforward z-acceleration (cubic_spline peaks at ±57 m/s²) is far beyond what the physics can deliver. The controller zeros z-feedforward in simplified mode and lets PD handle altitude, preventing unrecoverable dives from aggressive trajectories.
+
+### New Features
+
+| Feature | Details |
+|---------|---------|
+| **Physics mode dispatch** | `simplified` (default) or `full` — selected via `control.physics_mode` config |
+| **Acceleration limiting** | Component-wise clamp to `max_accel` (default 15.0 m/s²) |
+| **Gain scheduling** | Speed-dependent: kp×0.6, kd×1.6, ki×0.2 at max speed (configurable) |
+| **MPC controller** | Linear QP on simplified model, horizon=10, solve <5ms, warm-start |
+
+### MPC Controller Architecture
+
+`SimplifiedLinearModel` — discrete LTI matching gym_env:
+- State: `x = [pos(3), vel(3)]` (6D), Control: `u = [thrust, roll_rate, pitch_rate]` (3D)
+- `x_{k+1} = A*x_k + B*u_k + d` with drag=0.99, dt=0.02, gravity offset in `d`
+- Batch prediction: `X = S*x0 + T*U + W` for horizon N
+
+`MPCController` — unconstrained QP with post-clipping:
+- Precomputed `H = 2*(T^T*Q*T + R)` and `H_inv` at init
+- Per-step: `U = -H_inv * f` where `f = 2*(T^T*Q*e - R*U_ref)`
+- Bounds: thrust [0,1], rates [-8,8], applied via clipping
+- Fallback: feedforward command from first trajectory point on solve failure
+- Warm-start: shifted previous solution
+
+### Test Results
+
+| Test File | Tests | Status |
+|-----------|-------|--------|
+| `test_controller.py` | 10 (3 original + 7 new) | All pass |
+| `test_mpc_controller.py` | 8 (new) | All pass |
+| Full suite | 164 | All pass |
+
+### Key Findings
+
+1. **Thrust mapping was the root cause**: old controller gave thrust=0.49 for hover in simplified physics (needs 0.99). Drone was in constant free-fall, masked by always-saturated thrust=1.0 from large PD outputs.
+2. **Simplified physics z-axis is nearly unusable for aggressive trajectories**: max climb is +0.19 m/s². Any trajectory requiring >0.19 m/s² upward acceleration is physically impossible. Z-feedforward must be zeroed; PD handles altitude.
+3. **MPC solves in <1ms** for horizon=10 with precomputed matrices. Ready for real-time use.
+4. **Gain scheduling reduces overshoot at speed**: kp drops 40%, kd increases 60%, ki drops 80% at max speed.
+5. **Next priority**: full dynamics mode (`use_dynamics_model=True`) where z-axis has proper range and feedforward can be trusted. The simplified physics is too constrained for aggressive racing.
