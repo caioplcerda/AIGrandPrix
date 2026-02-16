@@ -43,10 +43,26 @@ perception:
     measurement_noise_pos: 0.5
 
 control:
+  controller_type: "pid"         # "pid" | "mpc"
+  physics_mode: "simplified"     # "simplified" | "full"
+  max_accel: 15.0
   pid:
     kp: [6.0, 6.0, 8.0]
     ki: [0.1, 0.1, 0.2]
     kd: [3.5, 3.5, 4.5]
+    gain_scheduling:
+      enabled: true
+      kp_high_speed_scale: 0.6
+      kd_high_speed_scale: 1.6
+      ki_high_speed_scale: 0.2
+  mpc:
+    horizon: 10
+    dt: 0.02
+    Q_pos: [10.0, 10.0, 20.0]
+    Q_vel: [2.0, 2.0, 5.0]
+    R: [0.1, 0.01, 0.01]
+    Q_terminal_scale: 2.0
+    max_solve_time_ms: 5.0
   max_rate: 8.0            # rad/s max angular rate
   max_thrust: 1.0          # normalized
 

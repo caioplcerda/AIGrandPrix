@@ -71,6 +71,21 @@ class RacingAgent:
             config=control_cfg,
         )
 
+        # MPC controller (created when controller_type == "mpc")
+        self._mpc = None
+        self._controller_type = "pid"
+        if control_cfg:
+            self._controller_type = control_cfg.get("controller_type", "pid")
+            if self._controller_type == "mpc":
+                from aigrandprix.control.mpc_controller import MPCConfig, MPCController
+                mpc_cfg = MPCConfig.from_config(control_cfg.get("mpc", {}))
+                self._mpc = MPCController(
+                    config=mpc_cfg,
+                    max_speed=self.config.max_speed,
+                    max_rate=control_cfg.get("max_rate", 8.0),
+                    max_thrust=control_cfg.get("max_thrust", 1.0),
+                )
+
         # Optional Phase 1 perception modules (None when not configured)
         self.depth_estimator = None
         self.state_estimator = None
@@ -156,22 +171,39 @@ class RacingAgent:
             self._trajectory_idx = 0
             self._last_replan_time = elapsed_time
 
-        # Follow trajectory using feedforward tracking for racing performance
+        # Follow trajectory
         if self._trajectory and self._trajectory_idx < len(self._trajectory):
-            target = self._trajectory[self._trajectory_idx]
-            command = self.controller.track_trajectory_point(
-                active_state,
-                target_pos=target.position,
-                target_vel=target.velocity,
-                target_accel=target.acceleration,
-            )
-            # Compute yaw to face next gate
-            if self._gates_passed < len(known_gates or []):
-                next_gate = known_gates[self._gates_passed]
-                command.yaw_rate = self.controller.compute_yaw_rate(
-                    active_state, next_gate.position,
+            if self._controller_type == "mpc" and self._mpc is not None:
+                # MPC: extract lookahead window
+                horizon = self._mpc.config.horizon
+                lookahead = self._trajectory[self._trajectory_idx:self._trajectory_idx + horizon]
+                # Pad with last point if near end
+                while len(lookahead) < horizon and lookahead:
+                    lookahead.append(lookahead[-1])
+                command = self._mpc.compute_control(active_state, lookahead)
+                # Add yaw rate from PID controller
+                if self._gates_passed < len(known_gates or []):
+                    next_gate = known_gates[self._gates_passed]
+                    command.yaw_rate = self.controller.compute_yaw_rate(
+                        active_state, next_gate.position,
+                    )
+                self._trajectory_idx += 1
+            else:
+                # PID: existing path (now with corrected physics mapping)
+                target = self._trajectory[self._trajectory_idx]
+                command = self.controller.track_trajectory_point(
+                    active_state,
+                    target_pos=target.position,
+                    target_vel=target.velocity,
+                    target_accel=target.acceleration,
                 )
-            self._trajectory_idx += 1
+                # Compute yaw to face next gate
+                if self._gates_passed < len(known_gates or []):
+                    next_gate = known_gates[self._gates_passed]
+                    command.yaw_rate = self.controller.compute_yaw_rate(
+                        active_state, next_gate.position,
+                    )
+                self._trajectory_idx += 1
         else:
             # Emergency: hold position
             command = self.controller.track_position(active_state, active_state.position)
@@ -189,6 +221,8 @@ class RacingAgent:
         self._gates_passed = 0
         self._last_replan_time = 0.0
         self.controller.reset()
+        if self._mpc is not None:
+            self._mpc.reset()
         if self.state_estimator is not None:
             self.state_estimator.reset(DroneState(
                 position=np.zeros(3),

@@ -103,6 +103,13 @@ class DroneController:
         dt: float = 0.01,
         config: dict | None = None,
     ) -> None:
+        self.physics_mode = "simplified"
+        self.max_accel = 15.0
+        self._gain_scheduling_enabled = False
+        self._gs_kp_scale = 0.6
+        self._gs_kd_scale = 1.6
+        self._gs_ki_scale = 0.2
+
         if config is not None and gains is None:
             pid_cfg = config.get("pid", {})
             if pid_cfg:
@@ -111,10 +118,17 @@ class DroneController:
                     ki=np.array(pid_cfg.get("ki", [0.1, 0.1, 0.2])),
                     kd=np.array(pid_cfg.get("kd", [3.5, 3.5, 4.5])),
                 )
+                gs_cfg = pid_cfg.get("gain_scheduling", {})
+                self._gain_scheduling_enabled = gs_cfg.get("enabled", False)
+                self._gs_kp_scale = gs_cfg.get("kp_high_speed_scale", 0.6)
+                self._gs_kd_scale = gs_cfg.get("kd_high_speed_scale", 1.6)
+                self._gs_ki_scale = gs_cfg.get("ki_high_speed_scale", 0.2)
             else:
                 self.gains = PIDGains()
             self.max_rate = config.get("max_rate", 8.0)
             self.max_thrust = config.get("max_thrust", 1.0)
+            self.physics_mode = config.get("physics_mode", "simplified")
+            self.max_accel = config.get("max_accel", 15.0)
         else:
             self.gains = gains or PIDGains()
             self.max_rate = 8.0
@@ -126,6 +140,30 @@ class DroneController:
         self._vel_prev_error = np.zeros(3)
         self.max_speed = 15.0  # m/s
 
+    def _get_scheduled_gains(self, speed: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Apply gain scheduling based on current speed.
+
+        At high speed: reduce kp (less overshoot), increase kd (stability),
+        reduce ki (no windup).
+        """
+        if not self._gain_scheduling_enabled:
+            return self.gains.kp.copy(), self.gains.ki.copy(), self.gains.kd.copy()
+
+        alpha = np.clip(speed / self.max_speed, 0.0, 1.0)
+        # Interpolate from base gains toward high-speed scales
+        kp = self.gains.kp * (1.0 - alpha * (1.0 - self._gs_kp_scale))
+        kd = self.gains.kd * (1.0 - alpha * (1.0 - self._gs_kd_scale))
+        ki = self.gains.ki * (1.0 - alpha * (1.0 - self._gs_ki_scale))
+        return kp, ki, kd
+
+    def _limit_accel(self, accel: np.ndarray) -> np.ndarray:
+        """Clamp acceleration per-component to max_accel.
+
+        Component-wise clipping is used because in simplified physics
+        each axis maps independently to a separate actuator.
+        """
+        return np.clip(accel, -self.max_accel, self.max_accel)
+
     def track_position(self, state: DroneState, target_pos: np.ndarray) -> ControlCommand:
         """PID position controller -> low-level commands."""
         error = target_pos - state.position
@@ -136,11 +174,10 @@ class DroneController:
         derivative = (error - self._prev_error) / self.dt
         self._prev_error = error.copy()
 
-        accel = (
-            self.gains.kp * error
-            + self.gains.ki * self._integral_error
-            + self.gains.kd * derivative
-        )
+        kp, ki, kd = self._get_scheduled_gains(state.speed)
+
+        accel = kp * error + ki * self._integral_error + kd * derivative
+        accel = self._limit_accel(accel)
 
         return self._accel_to_command(accel, state)
 
@@ -154,11 +191,10 @@ class DroneController:
         vel_derivative = (vel_error - self._vel_prev_error) / self.dt
         self._vel_prev_error = vel_error.copy()
 
-        accel = (
-            self.gains.kp * 0.8 * vel_error
-            + self.gains.ki * 0.5 * self._vel_integral_error
-            + self.gains.kd * 0.3 * vel_derivative
-        )
+        kp, ki, kd = self._get_scheduled_gains(state.speed)
+
+        accel = kp * 0.8 * vel_error + ki * 0.5 * self._vel_integral_error + kd * 0.3 * vel_derivative
+        accel = self._limit_accel(accel)
 
         return self._accel_to_command(accel, state)
 
@@ -179,14 +215,20 @@ class DroneController:
         vel_error = target_vel - state.velocity
 
         # Feedforward acceleration from trajectory
-        ff_accel = target_accel if target_accel is not None else np.zeros(3)
+        ff_accel = target_accel.copy() if target_accel is not None else np.zeros(3)
+
+        # In simplified physics the axes are decoupled and z-range is very
+        # narrow (+0.19 up, -19.81 down). Trajectory feedforward z-accel
+        # is typically far beyond what the physics can deliver, destabilizing
+        # thrust. Zero the z-feedforward and let PD handle altitude.
+        if self.physics_mode == "simplified":
+            ff_accel[2] = 0.0
+
+        kp, _ki, kd = self._get_scheduled_gains(state.speed)
 
         # PD on position + P on velocity + feedforward
-        accel = (
-            self.gains.kp * pos_error
-            + self.gains.kd * vel_error
-            + ff_accel
-        )
+        accel = kp * pos_error + kd * vel_error + ff_accel
+        accel = self._limit_accel(accel)
 
         return self._accel_to_command(accel, state)
 
@@ -202,11 +244,40 @@ class DroneController:
         return float(np.clip(yaw_error * 3.0, -self.max_rate / 2, self.max_rate / 2))
 
     def _accel_to_command(self, accel: np.ndarray, state: DroneState) -> ControlCommand:
-        """Convert desired acceleration to low-level angle rate + thrust commands."""
+        """Convert desired acceleration to low-level commands. Dispatches by physics_mode."""
+        if self.physics_mode == "simplified":
+            return self._accel_to_command_simplified(accel, state)
+        return self._accel_to_command_full(accel, state)
+
+    def _accel_to_command_simplified(self, accel: np.ndarray, state: DroneState) -> ControlCommand:
+        """Exact inverse of gym_env simplified physics.
+
+        gym_env does:
+            accel_x = pitch_rate * 0.5
+            accel_y = -roll_rate * 0.5
+            accel_z = (thrust - 0.5) * 20.0 - 9.81
+        So the inverse is:
+            thrust = (accel_z + 9.81) / 20.0 + 0.5
+            pitch_rate = accel_x * 2.0
+            roll_rate = -accel_y * 2.0
+        """
+        thrust = float(np.clip((accel[2] + 9.81) / 20.0 + 0.5, 0.0, self.max_thrust))
+        pitch_rate = float(np.clip(accel[0] * 2.0, -self.max_rate, self.max_rate))
+        roll_rate = float(np.clip(-accel[1] * 2.0, -self.max_rate, self.max_rate))
+
+        return ControlCommand(
+            thrust=thrust,
+            roll_rate=roll_rate,
+            pitch_rate=pitch_rate,
+            yaw_rate=0.0,
+        )
+
+    def _accel_to_command_full(self, accel: np.ndarray, state: DroneState) -> ControlCommand:
+        """Attitude-based mapping for Newton-Euler dynamics."""
         gravity = np.array([0.0, 0.0, 9.81])
         total_accel = accel + gravity
 
-        thrust = float(np.clip(np.linalg.norm(total_accel) / 20.0, 0, self.max_thrust))
+        thrust = float(np.clip(np.linalg.norm(total_accel) / (2.0 * 9.81), 0, self.max_thrust))
 
         if np.linalg.norm(total_accel) > 0.01:
             z_body = total_accel / np.linalg.norm(total_accel)
