@@ -113,13 +113,22 @@ class PathPlanner:
         gates: list[Gate],
         start_pos: np.ndarray,
     ) -> np.ndarray:
-        """Build waypoint array from start position and gate sequence."""
+        """Build waypoint array from start position and gate sequence.
+
+        Approach/exit waypoints inherit the gate's z but are clamped
+        to a minimum altitude to prevent ground crashes in simplified physics.
+        """
+        min_z = 0.8  # minimum safe altitude
         waypoints = [start_pos]
         for gate in gates:
             approach = gate.position - gate.normal * self._approach_distance
+            approach[2] = max(approach[2], min_z)
             waypoints.append(approach)
-            waypoints.append(gate.position)
+            gate_pos = gate.position.copy()
+            gate_pos[2] = max(gate_pos[2], min_z)
+            waypoints.append(gate_pos)
             exit_pt = gate.position + gate.normal * self._exit_distance
+            exit_pt[2] = max(exit_pt[2], min_z)
             waypoints.append(exit_pt)
         return np.array(waypoints)
 
@@ -279,14 +288,22 @@ class PathPlanner:
     ) -> list[TrajectoryPoint]:
         """Replan trajectory from current state to remaining gates.
 
-        Uses cubic spline for speed (real-time replanning) unless configured otherwise.
+        Uses cubic spline for speed (real-time replanning).
+        Reduces approach/exit distances since we're already en route.
         """
-        # Save and override method for fast replanning
+        # Save and override for fast replanning
         saved_method = self._trajectory_method
+        saved_approach = self._approach_distance
+        saved_exit = self._exit_distance
         if self._trajectory_method != "cubic_spline":
             self._trajectory_method = "cubic_spline"
+        # Shorter approach for replanning — we're already on course
+        self._approach_distance = 0.5
+        self._exit_distance = 0.5
 
         result = self.plan_through_gates(remaining_gates, current_pos, current_vel)
 
         self._trajectory_method = saved_method
+        self._approach_distance = saved_approach
+        self._exit_distance = saved_exit
         return result

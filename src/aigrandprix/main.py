@@ -178,48 +178,119 @@ class RacingAgent:
             self._trajectory_idx = 0
             self._last_replan_time = elapsed_time
 
-        # Follow trajectory
-        if self._trajectory and self._trajectory_idx < len(self._trajectory):
-            if self._controller_type == "mpc" and self._mpc is not None:
-                # MPC: extract lookahead window
-                horizon = self._mpc.config.horizon
-                lookahead = self._trajectory[self._trajectory_idx:self._trajectory_idx + horizon]
-                # Pad with last point if near end
-                while len(lookahead) < horizon and lookahead:
-                    lookahead.append(lookahead[-1])
-                command = self._mpc.compute_control(active_state, lookahead)
-                # Add yaw rate from PID controller
-                if self._gates_passed < len(known_gates or []):
-                    next_gate = known_gates[self._gates_passed]
-                    command.yaw_rate = self.controller.compute_yaw_rate(
-                        active_state, next_gate.position,
+        # --- Gate closing mode ---
+        # When close to the next gate, bypass trajectory and drive straight
+        # at the gate center. This prevents orbiting and overshoot oscillation.
+        gate_closing = False
+        if known_gates and self._gates_passed < len(known_gates):
+            next_gate = known_gates[self._gates_passed]
+            dist_to_gate = float(np.linalg.norm(active_state.position - next_gate.position))
+            if dist_to_gate < 5.0:
+                gate_closing = True
+                # Drive toward gate center with distance-scaled velocity.
+                # Scale speed linearly with distance to naturally decelerate
+                # on approach and prevent overshoot oscillation.
+                direction = next_gate.position - active_state.position
+                dir_norm = np.linalg.norm(direction)
+                if dir_norm > 0.01:
+                    approach_speed = min(
+                        dist_to_gate * 1.5,  # slow when close
+                        self.config.max_speed * 0.4,
+                        5.0,
                     )
-                self._trajectory_idx += 1
-            else:
-                # PID: existing path (now with corrected physics mapping)
-                target = self._trajectory[self._trajectory_idx]
+                    approach_vel = direction / dir_norm * approach_speed
+                    # Limit downward velocity to prevent unrecoverable dives
+                    # in simplified physics (max climb = +0.19 m/s²)
+                    approach_vel[2] = np.clip(approach_vel[2], -1.5, approach_speed)
+                else:
+                    approach_vel = np.zeros(3)
                 command = self.controller.track_trajectory_point(
                     active_state,
-                    target_pos=target.position,
-                    target_vel=target.velocity,
-                    target_accel=target.acceleration,
+                    target_pos=next_gate.position,
+                    target_vel=approach_vel,
+                    target_accel=None,
                 )
-                # Compute yaw to face next gate
-                if self._gates_passed < len(known_gates or []):
-                    next_gate = known_gates[self._gates_passed]
-                    command.yaw_rate = self.controller.compute_yaw_rate(
-                        active_state, next_gate.position,
+                command.yaw_rate = self.controller.compute_yaw_rate(
+                    active_state, next_gate.position,
+                )
+
+        # --- Trajectory following ---
+        if not gate_closing:
+            if self._trajectory and self._trajectory_idx < len(self._trajectory):
+                # Skip past trajectory points the drone has already passed
+                self._advance_trajectory_index(active_state)
+
+                if self._controller_type == "mpc" and self._mpc is not None:
+                    # MPC: extract lookahead window
+                    horizon = self._mpc.config.horizon
+                    lookahead = self._trajectory[self._trajectory_idx:self._trajectory_idx + horizon]
+                    # Pad with last point if near end
+                    while len(lookahead) < horizon and lookahead:
+                        lookahead.append(lookahead[-1])
+                    command = self._mpc.compute_control(active_state, lookahead)
+                    if self._gates_passed < len(known_gates or []):
+                        next_gate = known_gates[self._gates_passed]
+                        command.yaw_rate = self.controller.compute_yaw_rate(
+                            active_state, next_gate.position,
+                        )
+                    self._trajectory_idx += 1
+                else:
+                    # PID trajectory tracking
+                    target = self._trajectory[self._trajectory_idx]
+                    command = self.controller.track_trajectory_point(
+                        active_state,
+                        target_pos=target.position,
+                        target_vel=target.velocity,
+                        target_accel=target.acceleration,
                     )
-                self._trajectory_idx += 1
-        else:
-            # Emergency: hold position
-            command = self.controller.track_position(active_state, active_state.position)
+                    if self._gates_passed < len(known_gates or []):
+                        next_gate = known_gates[self._gates_passed]
+                        command.yaw_rate = self.controller.compute_yaw_rate(
+                            active_state, next_gate.position,
+                        )
+                    self._trajectory_idx += 1
+            else:
+                # Emergency: hold position
+                command = self.controller.track_position(active_state, active_state.position)
+
+        # --- Altitude boost for simplified physics ---
+        # When the next gate is significantly higher, ensure we're always
+        # climbing. In simplified physics, thrust=1.0 gives only +0.19 m/s²,
+        # so any unnecessary thrust reduction wastes precious climb time.
+        if known_gates and self._gates_passed < len(known_gates):
+            gate_z = known_gates[self._gates_passed].position[2]
+            z_deficit = gate_z - active_state.position[2]
+            if z_deficit > 0.5 and self.controller.physics_mode == "simplified":
+                command.thrust = max(command.thrust, 0.99)
 
         return command
+
+    def _advance_trajectory_index(self, state: DroneState) -> None:
+        """Skip trajectory points the drone has already passed.
+
+        Finds the closest point ahead on the trajectory and jumps there.
+        Prevents the drone from backtracking to old waypoints after replanning.
+        """
+        if not self._trajectory or self._trajectory_idx >= len(self._trajectory):
+            return
+        # Look ahead up to 20 points, find closest
+        best_idx = self._trajectory_idx
+        best_dist = float("inf")
+        end = min(self._trajectory_idx + 20, len(self._trajectory))
+        for i in range(self._trajectory_idx, end):
+            d = float(np.linalg.norm(self._trajectory[i].position - state.position))
+            if d < best_dist:
+                best_dist = d
+                best_idx = i
+        # Jump to closest point, but at least 1 ahead to keep moving forward
+        self._trajectory_idx = max(best_idx, self._trajectory_idx)
 
     def on_gate_passed(self, gate_id: int) -> None:
         """Called when a gate has been passed."""
         self._gates_passed += 1
+        # Force replan on next compute to target next gate
+        self._trajectory = []
+        self._trajectory_idx = 0
 
     def reset(self) -> None:
         """Reset agent for a new race."""

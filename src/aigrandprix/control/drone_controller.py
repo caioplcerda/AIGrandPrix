@@ -234,6 +234,11 @@ class DroneController:
         # thrust. Zero the z-feedforward and let PD handle altitude.
         if self.physics_mode == "simplified":
             ff_accel[2] = 0.0
+            # Clamp target z-velocity to prevent unrecoverable dives.
+            # Max climb is +0.19 m/s², so downward velocity builds fast
+            # and is very hard to arrest. Asymmetric clamp: allow more
+            # upward velocity tracking than downward.
+            vel_error[2] = np.clip(vel_error[2], -1.0, 5.0)
 
         kp, _ki, kd = self._get_scheduled_gains(state.speed)
 
@@ -273,8 +278,28 @@ class DroneController:
             roll_rate = -accel_y * 2.0
         """
         thrust = float(np.clip((accel[2] + 9.81) / 20.0 + 0.5, 0.0, self.max_thrust))
+        # In simplified physics, never command thrust far below hover.
+        # thrust=0.99 is hover, anything below 0.8 causes rapid descent
+        # that's nearly impossible to recover from.
+        thrust = max(thrust, 0.75)
         pitch_rate = float(np.clip(accel[0] * 2.0, -self.max_rate, self.max_rate))
         roll_rate = float(np.clip(-accel[1] * 2.0, -self.max_rate, self.max_rate))
+
+        # Altitude safety overrides for simplified physics.
+        # Max climb accel is only +0.19 m/s², but descent accel can be
+        # -19.8 m/s². This extreme asymmetry means any descent velocity
+        # is very hard to arrest. We must intervene early and aggressively.
+        z = state.position[2]
+        vz = state.velocity[2]
+        if vz < -1.5:
+            # Fast descent at any altitude: override to max thrust
+            thrust = 1.0
+        elif z < 2.0 and vz < -0.8:
+            thrust = 1.0
+        elif z < 1.0 and vz < -0.2:
+            thrust = 1.0
+        elif z < 0.5:
+            thrust = 1.0  # floor protection
 
         return ControlCommand(
             thrust=thrust,
