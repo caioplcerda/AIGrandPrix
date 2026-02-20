@@ -188,6 +188,9 @@ class GateDetector:
         self.method = method
         self._model = None
         self._model_loaded = False
+        self._detection_count = 0
+        self._fallback_count = 0
+        self._last_latency_ms = 0.0
 
         if config is not None:
             self._gate_color_lower = np.array(config.get("gate_color_lower", [0, 100, 100]))
@@ -224,20 +227,48 @@ class GateDetector:
             self._tracker = None
 
     def detect(self, image: np.ndarray) -> list[GateDetection]:
-        """Detect all visible gates in the image.
+        """Detect all visible gates with fallback chain.
 
-        Args:
-            image: BGR image from drone camera (H, W, 3)
-
-        Returns:
-            List of detected gates sorted by distance (closest first)
+        If primary method fails or returns empty, tries color detection as fallback.
         """
-        if self.method == "color":
-            return self._detect_color(image)
-        elif self.method == "cnn":
-            return self._detect_cnn(image)
-        else:
-            return self._detect_hybrid(image)
+        import time
+        t0 = time.perf_counter()
+        self._detection_count += 1
+
+        detections = []
+        try:
+            if self.method == "color":
+                detections = self._detect_color(image)
+            elif self.method == "cnn":
+                detections = self._detect_cnn(image)
+                if not detections:
+                    detections = self._detect_color(image)
+                    if detections:
+                        self._fallback_count += 1
+            else:  # hybrid
+                detections = self._detect_hybrid(image)
+        except Exception:
+            # Last resort: try color detection
+            try:
+                detections = self._detect_color(image)
+                self._fallback_count += 1
+            except Exception:
+                detections = []
+
+        self._last_latency_ms = (time.perf_counter() - t0) * 1000.0
+        return detections
+
+    @property
+    def detection_latency_ms(self) -> float:
+        """Latency of last detect() call in milliseconds."""
+        return self._last_latency_ms
+
+    @property
+    def fallback_rate(self) -> float:
+        """Fraction of detections that used fallback chain."""
+        if self._detection_count == 0:
+            return 0.0
+        return self._fallback_count / self._detection_count
 
     def detect_and_track(
         self,

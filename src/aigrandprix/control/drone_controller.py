@@ -110,6 +110,12 @@ class DroneController:
         self._gs_kd_scale = 1.6
         self._gs_ki_scale = 0.2
 
+        # Attitude PD gains for full dynamics (Mellinger-style cascaded control)
+        self._att_kp = 8.0
+        self._att_kd = 2.0
+        self._att_kp_yaw = 3.0
+        self._att_kd_yaw = 1.0
+
         if config is not None and gains is None:
             pid_cfg = config.get("pid", {})
             if pid_cfg:
@@ -129,6 +135,11 @@ class DroneController:
             self.max_thrust = config.get("max_thrust", 1.0)
             self.physics_mode = config.get("physics_mode", "simplified")
             self.max_accel = config.get("max_accel", 15.0)
+            att_cfg = config.get("attitude", {})
+            self._att_kp = att_cfg.get("kp", 8.0)
+            self._att_kd = att_cfg.get("kd", 2.0)
+            self._att_kp_yaw = att_cfg.get("kp_yaw", 3.0)
+            self._att_kd_yaw = att_cfg.get("kd_yaw", 1.0)
         else:
             self.gains = gains or PIDGains()
             self.max_rate = 8.0
@@ -273,28 +284,54 @@ class DroneController:
         )
 
     def _accel_to_command_full(self, accel: np.ndarray, state: DroneState) -> ControlCommand:
-        """Attitude-based mapping for Newton-Euler dynamics."""
+        """Mellinger-style cascaded position-attitude controller for full dynamics.
+
+        1. Compute desired attitude from desired acceleration
+        2. Compute attitude error (desired - current)
+        3. PD on attitude error to produce angular rate commands
+        """
         gravity = np.array([0.0, 0.0, 9.81])
         total_accel = accel + gravity
 
         thrust = float(np.clip(np.linalg.norm(total_accel) / (2.0 * 9.81), 0, self.max_thrust))
 
+        # Desired attitude from desired acceleration direction
         if np.linalg.norm(total_accel) > 0.01:
             z_body = total_accel / np.linalg.norm(total_accel)
         else:
             z_body = np.array([0, 0, 1])
 
-        roll_target = np.arcsin(np.clip(-z_body[1], -1, 1))
-        pitch_target = np.arctan2(z_body[0], z_body[2])
+        roll_desired = np.arcsin(np.clip(-z_body[1], -1, 1))
+        pitch_desired = np.arctan2(z_body[0], z_body[2])
 
-        roll_rate = float(np.clip(roll_target * 5.0, -self.max_rate, self.max_rate))
-        pitch_rate = float(np.clip(pitch_target * 5.0, -self.max_rate, self.max_rate))
+        # Current attitude from quaternion
+        current_rpy = quat_to_euler(state.orientation)
+        roll_current = current_rpy[0]
+        pitch_current = current_rpy[1]
+
+        # Attitude error
+        roll_error = roll_desired - roll_current
+        pitch_error = pitch_desired - pitch_current
+
+        # PD on attitude error: rate = kp * error - kd * angular_velocity
+        roll_rate = float(np.clip(
+            self._att_kp * roll_error - self._att_kd * state.angular_velocity[0],
+            -self.max_rate, self.max_rate,
+        ))
+        pitch_rate = float(np.clip(
+            self._att_kp * pitch_error - self._att_kd * state.angular_velocity[1],
+            -self.max_rate, self.max_rate,
+        ))
+        yaw_rate = float(np.clip(
+            -self._att_kp_yaw * current_rpy[2] - self._att_kd_yaw * state.angular_velocity[2],
+            -self.max_rate, self.max_rate,
+        ))
 
         return ControlCommand(
             thrust=thrust,
             roll_rate=roll_rate,
             pitch_rate=pitch_rate,
-            yaw_rate=0.0,
+            yaw_rate=yaw_rate,
         )
 
     def reset(self) -> None:

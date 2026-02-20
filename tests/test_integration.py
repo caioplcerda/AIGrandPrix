@@ -185,6 +185,54 @@ class TestControllerInEnv:
         env.close()
 
 
+class TestFullDynamicsIntegration:
+    """Test full dynamics mode in the simulation loop."""
+
+    def test_full_dynamics_no_crash_100_steps(self):
+        """Full dynamics: no crash for 100 steps."""
+        env = DroneRacingEnv(num_gates=3, max_steps=200, use_dynamics_model=True)
+        obs, _ = env.reset(seed=42)
+        gates = _env_gates_to_gate_list(env)
+        agent = RacingAgent(
+            RaceConfig(max_speed=8.0, control_dt=0.02),
+            full_config={"control": {"physics_mode": "full", "attitude": {"kp": 8.0, "kd": 2.0}}, "simulation": {"use_dynamics_model": True}},
+        )
+        dummy_image = np.zeros((480, 640, 3), dtype=np.uint8)
+        for step in range(100):
+            state = _env_state_to_drone_state(env)
+            cmd = agent.compute_action(image=dummy_image, state=state, elapsed_time=step * 0.02, known_gates=gates)
+            action = np.array([cmd.thrust, cmd.roll_rate, cmd.pitch_rate, cmd.yaw_rate], dtype=np.float32)
+            action = np.clip(action, env.action_space.low, env.action_space.high)
+            _, _, terminated, _, _ = env.step(action)
+            assert not terminated, f"Full dynamics crashed at step {step}"
+        env.close()
+
+    def test_full_dynamics_passes_gate(self):
+        """Full dynamics: pass at least 1 gate."""
+        env = DroneRacingEnv(num_gates=3, max_steps=2000, use_dynamics_model=True)
+        obs, _ = env.reset(seed=42)
+        gates = _env_gates_to_gate_list(env)
+        agent = RacingAgent(
+            RaceConfig(max_speed=8.0, control_dt=0.02),
+            full_config={"control": {"physics_mode": "full", "attitude": {"kp": 8.0, "kd": 2.0}}, "simulation": {"use_dynamics_model": True}},
+        )
+        dummy_image = np.zeros((480, 640, 3), dtype=np.uint8)
+        max_gates = 0
+        for step in range(2000):
+            state = _env_state_to_drone_state(env)
+            cmd = agent.compute_action(image=dummy_image, state=state, elapsed_time=step * 0.02, known_gates=gates)
+            action = np.array([cmd.thrust, cmd.roll_rate, cmd.pitch_rate, cmd.yaw_rate], dtype=np.float32)
+            action = np.clip(action, env.action_space.low, env.action_space.high)
+            _, _, terminated, truncated, info = env.step(action)
+            if info["gates_passed"] > max_gates:
+                agent.on_gate_passed(max_gates)
+                max_gates = info["gates_passed"]
+            if terminated or truncated:
+                break
+        env.close()
+        assert max_gates >= 1, f"Full dynamics should pass at least 1 gate, got {max_gates}"
+
+
 class TestPlannerInEnv:
     """Test the planner generating valid trajectories for env gates."""
 

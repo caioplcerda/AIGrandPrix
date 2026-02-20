@@ -1,0 +1,41 @@
+# DCL Round 1 Submission Configuration
+# Tuned for reliability (gate completion > speed)
+
+race:
+  max_speed: 12.0
+  max_accel: 8.0
+  control_dt: 0.02
+  replan_interval: 0.5
+
+control:
+  controller_type: "pid"
+  physics_mode: "simplified"  # Update when DCL physics known
+  max_accel: 12.0
+  pid:
+    kp: [5.0, 5.0, 7.0]
+    ki: [0.08, 0.08, 0.15]
+    kd: [3.5, 3.5, 4.5]
+    gain_scheduling:
+      enabled: true
+      kp_high_speed_scale: 0.7
+      kd_high_speed_scale: 1.4
+      ki_high_speed_scale: 0.3
+  attitude:
+    kp: 8.0
+    kd: 2.0
+    kp_yaw: 3.0
+    kd_yaw: 1.0
+  max_rate: 8.0
+  max_thrust: 1.0
+
+perception:
+  method: "hybrid"
+
+planning:
+  approach_distance: 1.5
+  exit_distance: 1.0
+  trajectory_dt: 0.02
+  trajectory_method: "cubic_spline"  # Fast + reliable for replanning
+
+safety:
+  max_latency_ms: 50.0

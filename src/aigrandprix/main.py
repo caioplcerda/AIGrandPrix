@@ -117,6 +117,7 @@ class RacingAgent:
         state: DroneState,
         elapsed_time: float,
         known_gates: list[Gate] | None = None,
+        current_gate_index: int | None = None,
     ) -> ControlCommand:
         """Compute the next control action given current sensor data.
 
@@ -127,6 +128,7 @@ class RacingAgent:
             state: Current drone state
             elapsed_time: Time since race start
             known_gates: Pre-loaded gate positions (if available)
+            current_gate_index: External gate progress (from DCL platform)
 
         Returns:
             Control command for the drone
@@ -140,6 +142,11 @@ class RacingAgent:
                 dt=self.config.control_dt,
             )
             active_state = self.state_estimator.get_state()
+
+        # External gate sync (from DCL platform)
+        if current_gate_index is not None and current_gate_index > self._gates_passed:
+            for _ in range(current_gate_index - self._gates_passed):
+                self.on_gate_passed(self._gates_passed)
 
         # Detect gates with tracking if available
         if self.depth_estimator is not None and hasattr(self.detector, "detect_and_track"):

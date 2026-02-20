@@ -71,7 +71,9 @@ def run_episode(
     full_config: dict | None = None,
 ) -> EpisodeResult:
     """Run a single episode with the racing agent."""
-    env = DroneRacingEnv(num_gates=num_gates, max_steps=max_steps)
+    sim_cfg = full_config.get("simulation", {}) if full_config else {}
+    use_dynamics = sim_cfg.get("use_dynamics_model", False)
+    env = DroneRacingEnv(num_gates=num_gates, max_steps=max_steps, use_dynamics_model=use_dynamics)
     env.reset(seed=seed)
     gates = _build_gates(env)
     gate_positions = np.array([g.position for g in gates])

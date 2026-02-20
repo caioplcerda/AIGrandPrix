@@ -8,20 +8,35 @@ The **AI Grand Prix** is a global autonomous drone racing competition by **Andur
 
 - **Prize Pool**: $500,000 + job opportunity at Anduril
 - **Website**: https://theaigrandprix.com
-- **Contact**: contact_aipg@theaigrandprix.com
+- **Contact**: contact_aigp@theaigrandprix.com
+- **Entry Fee**: None (teams cover their own travel/accommodation expenses)
 
 ## Timeline
 | Phase | Date | Details |
 |-------|------|---------|
-| 1st Virtual Qualifier | May 2026 | Submit Python AI algorithms to DCL platform |
+| 1st Virtual Qualifier (Round 1) | May 2026 | Windows app, downloadable DCL platform, time-based scoring |
 | 2nd Virtual Qualifier | June 2026 | Second chance / improved submissions |
 | Physical Qualifier | September 2026 | In-person, Southern California (2 weeks) |
 | AI Grand Prix Final | November 2026 | Columbus, Ohio - live head-to-head racing |
+
+**Upcoming**: Interface specifications, I/O definitions, submission instructions, and exact dates to be shared in coming weeks.
 
 ## Technical Requirements
 
 ### What We Must Build
 An autonomous system that navigates a drone through a sequence of gates in a virtual environment, as fast as possible.
+
+### Round 1 Format (1st Virtual Qualifier)
+- **Platform**: Windows-based downloadable application built on DCL's competition platform
+- **Environment**: Virtual 3D racecourse, no visual gimmicks, focused purely on autonomy performance
+- **Course**: Structured racecourse with defined number of standardized gates
+- **Sequencing**: All gates must be passed in correct order
+- **Physics**: Realistic drone physics and flight dynamics
+- **Scoring**: Time-based — fastest valid run wins, but **primary goal is passing all gates**
+- **Emphasis**: Precision, stability, and speed under realistic physical constraints
+- **Hardware Req**: Mid-tier PC with dedicated GPU (exact specs TBD); competition ensures coding skill wins over hardware budget
+- **Submission**: Python autonomy stack integrated into simulator, executed in controlled evaluation environment
+- **IP**: Full ownership retained; organizers only use code for judging/monitoring during competition period
 
 ### Three Core Pillars
 1. **Gate Recognition (Perception)**: Detect and locate gates using sensor data + visual feed. Gates are mostly standardized.
@@ -32,8 +47,9 @@ An autonomous system that navigates a drone through a sequence of gates in a vir
 - **NO manual control** - fully autonomous
 - **NO hardware modifications** - identical Neros Technology drones with DCL AI vector module
 - **Python-based AI algorithms** submitted to DCL-built platform
-- **Fastest time wins** - complete all gates in shortest time
+- **Fastest time wins** - but passing all gates is the primary goal
 - Software quality is the ONLY differentiator
+- No entry fees
 
 ### Hardware (Provided)
 - Identical drones built by **Neros Technologies**
@@ -115,10 +131,11 @@ src/aigrandprix/
 - Tests in `tests/` directory
 
 ### Performance Priority
-1. **Lap time** is the ONLY metric that matters
-2. Optimize for speed through gates, not code elegance
-3. Profile and benchmark everything
-4. Sim-to-real transfer must be considered
+1. **Gate completion** is the primary goal — pass all gates in correct order
+2. **Lap time** is the tiebreaker — fastest valid run wins among completions
+3. Optimize for reliability first, then speed through gates
+4. Profile and benchmark everything
+5. Sim-to-real transfer must be considered
 
 ### Testing
 - Unit tests for each module

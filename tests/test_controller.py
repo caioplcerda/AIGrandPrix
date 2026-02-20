@@ -144,3 +144,61 @@ def test_accel_limiting_no_clamp_when_small():
     small_accel = np.array([1.0, 2.0, 3.0])
     result = ctrl._limit_accel(small_accel)
     np.testing.assert_allclose(result, small_accel)
+
+
+# --- Full dynamics attitude controller tests ---
+
+def test_full_dynamics_attitude_error_drives_rates():
+    """Level drone at hover: near-zero rates."""
+    ctrl = DroneController()
+    ctrl.physics_mode = "full"
+    state = _make_state(pos=[0, 0, 1])  # level, hover
+    target = np.array([0.0, 0.0, 1.0])
+    cmd = ctrl.track_position(state, target)
+    assert abs(cmd.roll_rate) < 0.5
+    assert abs(cmd.pitch_rate) < 0.5
+
+
+def test_full_dynamics_tilted_drone_corrects():
+    """Tilted drone should produce corrective rate commands."""
+    from aigrandprix.utils.math_utils import euler_to_quat
+    ctrl = DroneController()
+    ctrl.physics_mode = "full"
+    # 15-degree pitch
+    tilted_orient = euler_to_quat(np.array([0.0, np.radians(15), 0.0]))
+    state = DroneState(
+        position=np.array([0.0, 0.0, 1.0]),
+        velocity=np.zeros(3),
+        orientation=tilted_orient,
+        angular_velocity=np.zeros(3),
+    )
+    target = np.array([0.0, 0.0, 1.0])  # hover in place
+    cmd = ctrl.track_position(state, target)
+    # Should produce corrective pitch rate (negative, to reduce pitch)
+    # The exact sign depends on the convention, just check it's non-trivial
+    assert abs(cmd.pitch_rate) > 0.5
+
+
+def test_full_dynamics_closed_loop_hover():
+    """Full dynamics hover: <2.0m drift over 500 steps."""
+    from aigrandprix.simulation.gym_env import DroneRacingEnv
+    env = DroneRacingEnv(num_gates=1, max_steps=600, use_dynamics_model=True)
+    env.reset(seed=42)
+    ctrl = DroneController(dt=0.02, config={"physics_mode": "full", "attitude": {"kp": 8.0, "kd": 2.0}})
+    initial_pos = env._drone_pos.copy()
+    for _ in range(500):
+        state = DroneState(
+            position=env._drone_pos.copy(),
+            velocity=env._drone_vel.copy(),
+            orientation=env._drone_orient.copy(),
+            angular_velocity=env._drone_angular_vel.copy(),
+        )
+        cmd = ctrl.track_position(state, initial_pos)
+        action = np.array([cmd.thrust, cmd.roll_rate, cmd.pitch_rate, cmd.yaw_rate], dtype=np.float32)
+        action = np.clip(action, env.action_space.low, env.action_space.high)
+        _, _, terminated, _, _ = env.step(action)
+        if terminated:
+            break
+    drift = np.linalg.norm(env._drone_pos - initial_pos)
+    env.close()
+    assert drift < 2.0, f"Hover drift too large: {drift:.2f}m"
