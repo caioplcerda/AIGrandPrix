@@ -68,23 +68,33 @@ We pursue a hybrid approach combining:
 ### Architecture
 ```
 src/aigrandprix/
-├── perception/       # Gate detection, visual processing
-│   ├── gate_detector.py      # CNN/YOLO gate detection
+├── config.py                 # Configuration loading & defaults
+├── main.py                   # Entry point / competition submission
+├── perception/               # Gate detection, visual processing
+│   ├── gate_detector.py      # Gate detection with fallback chain & monitoring
+│   ├── cnn_model.py          # CNN architecture for gate detection (no trained weights yet)
+│   ├── data_generator.py     # Synthetic training data generation
 │   ├── depth_estimation.py   # Distance to gate
 │   └── state_estimator.py    # Drone state from sensors
-├── control/          # Flight dynamics control
-│   ├── pid_controller.py     # PID flight controller
-│   ├── mpc_controller.py     # Model Predictive Control
+├── control/                  # Flight dynamics control
+│   ├── drone_controller.py   # PID controller with physics mode dispatch
+│   ├── mpc_controller.py     # Model Predictive Control (linear QP)
 │   └── drone_dynamics.py     # Physics model
-├── planning/         # Path planning & navigation
-│   ├── path_planner.py       # Gate-to-gate trajectory
-│   ├── trajectory_opt.py     # Minimum-jerk / time-optimal
+├── planning/                 # Path planning & navigation
+│   ├── path_planner.py       # Gate-to-gate trajectory with altitude safety
+│   ├── trajectory_opt.py     # Minimum-jerk / time-optimal / min-snap
 │   └── race_strategy.py      # Overall race optimization
-├── simulation/       # Sim interface & training
+├── simulation/               # Sim interface & training
 │   ├── sim_interface.py      # Abstract simulator interface
 │   ├── gym_env.py            # Gymnasium environment wrapper
-│   └── reward_shaping.py     # RL reward functions
-└── main.py           # Entry point / competition submission
+│   └── run_sim.py            # Simulation runner (config-driven)
+├── submission/               # DCL competition submission interface
+│   ├── entry_point.py        # AutonomousRacer facade
+│   ├── dcl_adapter.py        # DCL platform adapter (stub)
+│   ├── type_converters.py    # Observation/command/gate converters
+│   └── safety.py             # SafeActionWrapper (latency, exceptions, hover fallback)
+└── utils/
+    └── math_utils.py         # Shared math utilities
 ```
 
 ### Key Reference Repositories
@@ -229,4 +239,88 @@ Trajectory feedforward z-acceleration (cubic_spline peaks at ±57 m/s²) is far 
 2. **Simplified physics z-axis is nearly unusable for aggressive trajectories**: max climb is +0.19 m/s². Any trajectory requiring >0.19 m/s² upward acceleration is physically impossible. Z-feedforward must be zeroed; PD handles altitude.
 3. **MPC solves in <1ms** for horizon=10 with precomputed matrices. Ready for real-time use.
 4. **Gain scheduling reduces overshoot at speed**: kp drops 40%, kd increases 60%, ki drops 80% at max speed.
-5. **Next priority**: full dynamics mode (`use_dynamics_model=True`) where z-axis has proper range and feedforward can be trusted. The simplified physics is too constrained for aggressive racing.
+
+## Phase 4 Results — DCL Submission & Robustness
+
+### Full Dynamics Controller
+
+Fixed `_accel_to_command_full()` with Mellinger-style cascaded position→attitude controller:
+- PD on attitude error with configurable gains (kp=8, kd=2) loaded from config
+- `use_dynamics_model` flows from config through `run_sim.py` to `DroneRacingEnv`
+- Full dynamics PID gain preset added to `default.yaml` (commented out)
+- `scripts/tune_full_dynamics.py` for parametric gain sweeps
+
+### DCL Submission Interface
+
+New `src/aigrandprix/submission/` module for competition integration:
+
+| Component | Purpose |
+|-----------|---------|
+| `entry_point.py` | `AutonomousRacer` facade — single entry point for DCL platform |
+| `dcl_adapter.py` | DCL platform adapter stub (to be filled when API is released) |
+| `type_converters.py` | Converts between internal and DCL observation/command/gate formats |
+| `safety.py` | `SafeActionWrapper` — latency tracking, exception catching, hover fallback |
+
+- `current_gate_index` param added to `RacingAgent.compute_action()` for DCL gate sync
+- `configs/dcl_submission.yaml` created for submission-specific settings
+
+### Robustness & Stress Testing
+
+- **Stress tests**: parametric gates × seeds matrix, memory stability, latency P95
+- **Robustness tests**: gate miss recovery, close gates, sharp turns, altitude changes
+- **Perception tests**: size/brightness sweep, no false positives, fallback chain verification
+- **Gate detector hardened**: fallback chain with monitoring properties
+- `scripts/benchmark_gate_completion.py` for failure mode classification
+
+### Test Results
+
+| Test File | Tests | Status |
+|-----------|-------|--------|
+| Stress tests | 12 (new) | All pass |
+| Robustness tests | 15 (new) | All pass |
+| Perception robustness | 10 (new) | All pass |
+| Submission module | 19 (new) | All pass |
+| Full suite | 220 | All pass |
+
+## Phase 5 Results — 100% Gate Completion
+
+### Optimizations
+
+| Area | Change |
+|------|--------|
+| **Gate closing mode** | Activation range 2.5m→5.0m, distance-scaled approach speed (dist×1.5) |
+| **Altitude safety** | Thrust floor 0.75, descent intervention, z-vel error clamping, floor protection at z=0.8 |
+| **Path planner** | Min altitude floor (z ≥ 0.8), reduced replan approach/exit distances |
+| **Trajectory following** | Advance past passed waypoints, force replan on gate pass, altitude boost |
+
+### Benchmark Results: 200/200 Episodes, 100% Gate Completion
+
+| Scenario | Episodes | Gates/Episode | Gates Passed | Crashes | Timeouts |
+|----------|----------|---------------|--------------|---------|----------|
+| Standard | 50 | 5 | 250/250 | 0 | 0 |
+| Dense | 50 | 8 | 400/400 | 0 | 0 |
+| Long course | 100 | 10 | 1000/1000 | 0 | 0 |
+| **Total** | **200** | — | **1650/1650** | **0** | **0** |
+
+### Test Results
+
+| Full suite | 243 tests | All pass |
+|-----------|-------|--------|
+
+## Current Status & Remaining Work
+
+### What Works
+- 100% gate completion in simplified physics (200/200 episodes, 0 crashes)
+- PID controller with physics-mode dispatch (simplified + full dynamics)
+- MPC controller (linear QP, <1ms solve time)
+- DCL submission interface scaffolding
+- Comprehensive test suite (243 tests, all passing)
+
+### What Remains
+1. **Full dynamics mode**: works structurally but is not the default; hasn't achieved 100% gate completion yet
+2. **Speed optimization**: gate completion is reliable but flight speed can be improved significantly
+3. **CNN gate detector**: architecture exists (`cnn_model.py`) but has no trained weights
+4. **No training pipeline**: no RL or supervised training loop implemented
+5. **Sim returns blank images**: no visual rendering — perception runs on gate position data, not vision
+6. **Visual detections not integrated**: gate detector output not wired into planning loop
+7. **DCL platform integration**: adapter is a stub pending DCL API specification release
