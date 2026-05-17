@@ -281,7 +281,7 @@ class DroneController:
         # In simplified physics, never command thrust far below hover.
         # thrust=0.99 is hover, anything below 0.8 causes rapid descent
         # that's nearly impossible to recover from.
-        thrust = max(thrust, 0.75)
+        thrust = max(thrust, 0.65)
         pitch_rate = float(np.clip(accel[0] * 2.0, -self.max_rate, self.max_rate))
         roll_rate = float(np.clip(-accel[1] * 2.0, -self.max_rate, self.max_rate))
 
@@ -291,7 +291,7 @@ class DroneController:
         # is very hard to arrest. We must intervene early and aggressively.
         z = state.position[2]
         vz = state.velocity[2]
-        if vz < -1.5:
+        if vz < -2.5:
             # Fast descent at any altitude: override to max thrust
             thrust = 1.0
         elif z < 2.0 and vz < -0.8:

@@ -47,20 +47,22 @@ class PathPlanner:
         max_speed: float = 15.0,
         max_accel: float = 10.0,
         config: dict | None = None,
+        trajectory_speed_frac: float = 0.85,
     ) -> None:
         self.max_speed = max_speed
         self.max_accel = max_accel
+        self._trajectory_speed_frac = trajectory_speed_frac
         if config is not None:
-            self._approach_distance = config.get("approach_distance", 1.5)
-            self._exit_distance = config.get("exit_distance", 1.0)
+            self._approach_distance = config.get("approach_distance", 1.0)
+            self._exit_distance = config.get("exit_distance", 0.5)
             self._trajectory_dt = config.get("trajectory_dt", 0.02)
             self._trajectory_method = config.get("trajectory_method", "min_snap")
             self._racing_line_config = config.get("racing_line", {})
             self._time_alloc_config = config.get("time_allocation", {})
             self._min_snap_config = config.get("min_snap", {})
         else:
-            self._approach_distance = 1.5
-            self._exit_distance = 1.0
+            self._approach_distance = 1.0
+            self._exit_distance = 0.5
             self._trajectory_dt = 0.02
             self._trajectory_method = "cubic_spline"
             self._racing_line_config = {}
@@ -137,7 +139,7 @@ class PathPlanner:
         diffs = np.diff(waypoints, axis=0)
         distances = np.linalg.norm(diffs, axis=1)
         # Use a fraction of max speed as average segment speed
-        avg_speed = max(self.max_speed * 0.6, 1.0)
+        avg_speed = max(self.max_speed * self._trajectory_speed_frac, 1.0)
         times = distances / avg_speed
         # Enforce minimum segment time
         times = np.maximum(times, 0.1)
@@ -158,7 +160,7 @@ class PathPlanner:
         if total_dist < 0.01:
             return []
 
-        avg_speed = min(self.max_speed * 0.7, total_dist / 2.0)
+        avg_speed = min(self.max_speed * self._trajectory_speed_frac, total_dist / 2.0)
         total_time = total_dist / max(avg_speed, 0.1)
         time_params = cumulative_dist / total_dist * total_time
 

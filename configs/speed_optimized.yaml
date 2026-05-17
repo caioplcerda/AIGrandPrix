@@ -1,0 +1,123 @@
+# AI Grand Prix - Speed Optimized Configuration
+# Use this preset for faster flight while maintaining high gate completion.
+# Compare against default.yaml to measure speed improvement.
+
+race:
+  max_speed: 15.0
+  max_accel: 10.0
+  control_dt: 0.01
+  replan_interval: 0.3
+  gate_closing_range: 4.0
+  gate_closing_speed_frac: 0.5
+  gate_closing_speed_cap: 7.0
+  gate_closing_dist_scale: 2.0
+  gate_closing_vz_clamp: -2.0
+  trajectory_lookahead: 30
+  trajectory_speed_frac: 0.7
+
+perception:
+  method: "hybrid"
+  camera_fov: 90
+  image_width: 640
+  image_height: 480
+  gate_color_lower: [0, 100, 100]
+  gate_color_upper: [10, 255, 255]
+  gate_real_width: 1.0
+  gate_real_height: 1.0
+  camera:
+    fx: 320.0
+    fy: 320.0
+    cx: 320.0
+    cy: 240.0
+  cnn:
+    backend: "custom"
+    model_path: null
+    confidence_threshold: 0.5
+    nms_threshold: 0.4
+    input_size: [320, 320]
+  tracking:
+    enabled: false
+  state_estimator:
+    enabled: false
+
+control:
+  controller_type: "pid"
+  physics_mode: "simplified"
+  max_accel: 15.0
+  pid:
+    kp: [6.0, 6.0, 8.0]
+    ki: [0.1, 0.1, 0.2]
+    kd: [3.5, 3.5, 4.5]
+    gain_scheduling:
+      enabled: true
+      kp_high_speed_scale: 0.6
+      kd_high_speed_scale: 1.6
+      ki_high_speed_scale: 0.2
+  attitude:
+    kp: 8.0
+    kd: 2.0
+    kp_yaw: 3.0
+    kd_yaw: 1.0
+  mpc:
+    horizon: 10
+    dt: 0.02
+    Q_pos: [10.0, 10.0, 20.0]
+    Q_vel: [2.0, 2.0, 5.0]
+    R: [0.1, 0.01, 0.01]
+    Q_terminal_scale: 2.0
+    max_solve_time_ms: 5.0
+  max_rate: 8.0
+  max_thrust: 1.0
+
+planning:
+  approach_distance: 1.0   # shorter than default 1.5 for faster transitions
+  exit_distance: 0.5       # shorter than default 1.0 for faster transitions
+  trajectory_dt: 0.02
+  trajectory_method: "min_snap"
+  racing_line:
+    enabled: true
+    gate_margin: 0.15
+    curvature_weight: 2.0
+  time_allocation:
+    enabled: true
+    min_segment_time: 0.1
+    max_iterations: 50
+    tolerance: 0.01
+  min_snap:
+    regularization: 1.0e-6
+
+drone:
+  mass: 0.75
+  arm_length: 0.125
+  Ixx: 0.0025
+  Iyy: 0.0025
+  Izz: 0.0045
+  thrust_coeff: 1.0e-5
+  drag_coeff: 1.0e-7
+  motor_max_rpm: 25000
+  linear_drag: 0.01
+  gravity: 9.81
+  motor_time_constant: 0.02
+
+normalization:
+  pos_bound: 50.0
+  vel_bound: 30.0
+  angular_vel_bound: 10.0
+  gate_rel_bound: 50.0
+
+simulation:
+  num_gates: 5
+  max_steps: 2000
+  render: false
+  use_dynamics_model: false
+  normalize_obs: false
+  normalize_actions: false
+
+training:
+  algorithm: "PPO"
+  total_timesteps: 1000000
+  learning_rate: 0.0003
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95

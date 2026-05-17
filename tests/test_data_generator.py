@@ -14,7 +14,7 @@ class TestGateDataGenerator:
         gen = GateDataGenerator()
         sample = gen.generate_sample(rng=np.random.default_rng(42))
         assert isinstance(sample, SyntheticSample)
-        assert sample.image.shape == (480, 640, 3)
+        assert sample.image.shape == (360, 640, 3)  # VADR-TS-002: 640×360
         assert sample.image.dtype == np.uint8
 
     def test_sample_has_annotations(self):

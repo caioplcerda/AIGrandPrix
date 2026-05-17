@@ -23,8 +23,15 @@ class RaceConfig:
     max_speed: float = 15.0
     max_accel: float = 10.0
     detection_method: str = "hybrid"
-    replan_interval: float = 0.5  # seconds between replanning
+    replan_interval: float = 0.3  # seconds between replanning
     control_dt: float = 0.01  # control loop timestep
+    gate_closing_range: float = 4.0
+    gate_closing_speed_frac: float = 0.5
+    gate_closing_speed_cap: float = 7.0
+    gate_closing_dist_scale: float = 2.0
+    gate_closing_vz_clamp: float = -2.0
+    trajectory_lookahead: int = 30
+    trajectory_speed_frac: float = 0.7
 
     @classmethod
     def from_config(cls, config: dict) -> RaceConfig:
@@ -34,8 +41,15 @@ class RaceConfig:
             max_speed=race.get("max_speed", 15.0),
             max_accel=race.get("max_accel", 10.0),
             detection_method=perception.get("method", "hybrid"),
-            replan_interval=race.get("replan_interval", 0.5),
+            replan_interval=race.get("replan_interval", 0.3),
             control_dt=race.get("control_dt", 0.01),
+            gate_closing_range=race.get("gate_closing_range", 4.0),
+            gate_closing_speed_frac=race.get("gate_closing_speed_frac", 0.5),
+            gate_closing_speed_cap=race.get("gate_closing_speed_cap", 7.0),
+            gate_closing_dist_scale=race.get("gate_closing_dist_scale", 2.0),
+            gate_closing_vz_clamp=race.get("gate_closing_vz_clamp", -2.0),
+            trajectory_lookahead=int(race.get("trajectory_lookahead", 30)),
+            trajectory_speed_frac=race.get("trajectory_speed_frac", 0.7),
         )
 
 
@@ -65,6 +79,7 @@ class RacingAgent:
             max_speed=self.config.max_speed,
             max_accel=self.config.max_accel,
             config=planning_cfg,
+            trajectory_speed_frac=self.config.trajectory_speed_frac,
         )
         self.controller = DroneController(
             dt=self.config.control_dt,
@@ -185,7 +200,7 @@ class RacingAgent:
         if known_gates and self._gates_passed < len(known_gates):
             next_gate = known_gates[self._gates_passed]
             dist_to_gate = float(np.linalg.norm(active_state.position - next_gate.position))
-            if dist_to_gate < 5.0:
+            if dist_to_gate < self.config.gate_closing_range:
                 gate_closing = True
                 # Drive toward gate center with distance-scaled velocity.
                 # Scale speed linearly with distance to naturally decelerate
@@ -194,14 +209,14 @@ class RacingAgent:
                 dir_norm = np.linalg.norm(direction)
                 if dir_norm > 0.01:
                     approach_speed = min(
-                        dist_to_gate * 1.5,  # slow when close
-                        self.config.max_speed * 0.4,
-                        5.0,
+                        dist_to_gate * self.config.gate_closing_dist_scale,
+                        self.config.max_speed * self.config.gate_closing_speed_frac,
+                        self.config.gate_closing_speed_cap,
                     )
                     approach_vel = direction / dir_norm * approach_speed
                     # Limit downward velocity to prevent unrecoverable dives
                     # in simplified physics (max climb = +0.19 m/s²)
-                    approach_vel[2] = np.clip(approach_vel[2], -1.5, approach_speed)
+                    approach_vel[2] = np.clip(approach_vel[2], self.config.gate_closing_vz_clamp, approach_speed)
                 else:
                     approach_vel = np.zeros(3)
                 command = self.controller.track_trajectory_point(
@@ -273,10 +288,10 @@ class RacingAgent:
         """
         if not self._trajectory or self._trajectory_idx >= len(self._trajectory):
             return
-        # Look ahead up to 20 points, find closest
+        # Look ahead to find closest trajectory point
         best_idx = self._trajectory_idx
         best_dist = float("inf")
-        end = min(self._trajectory_idx + 20, len(self._trajectory))
+        end = min(self._trajectory_idx + self.config.trajectory_lookahead, len(self._trajectory))
         for i in range(self._trajectory_idx, end):
             d = float(np.linalg.norm(self._trajectory[i].position - state.position))
             if d < best_dist:

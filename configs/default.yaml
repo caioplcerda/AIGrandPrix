@@ -4,7 +4,14 @@ race:
   max_speed: 15.0          # m/s maximum drone speed
   max_accel: 10.0          # m/s^2 maximum acceleration
   control_dt: 0.01         # control loop timestep (100 Hz)
-  replan_interval: 0.5     # seconds between trajectory replanning
+  replan_interval: 0.3     # seconds between trajectory replanning
+  gate_closing_range: 4.0       # meters — activation distance for gate closing mode
+  gate_closing_speed_frac: 0.5  # fraction of max_speed for gate approach
+  gate_closing_speed_cap: 7.0   # m/s hard cap on gate approach speed
+  gate_closing_dist_scale: 2.0  # speed = dist_to_gate * this factor
+  gate_closing_vz_clamp: -2.0   # max downward velocity in gate closing
+  trajectory_lookahead: 30      # points to search ahead for closest waypoint
+  trajectory_speed_frac: 0.7    # fraction of max_speed for trajectory planning
 
 perception:
   method: "hybrid"         # color | cnn | hybrid
@@ -77,8 +84,8 @@ control:
   max_thrust: 1.0          # normalized
 
 planning:
-  approach_distance: 1.5   # meters before gate for approach waypoint
-  exit_distance: 1.0       # meters after gate for exit waypoint
+  approach_distance: 1.0   # meters before gate for approach waypoint
+  exit_distance: 0.5       # meters after gate for exit waypoint
   trajectory_dt: 0.02      # trajectory sampling interval
   trajectory_method: "min_snap"  # cubic_spline | min_jerk | min_snap
   racing_line:

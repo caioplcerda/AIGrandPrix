@@ -36,35 +36,80 @@ class SyntheticSample:
 
 
 class GateDataGenerator:
-    """Generates synthetic training images with gate annotations."""
+    """Generates synthetic training images with gate annotations.
+
+    Configured by default for VADR-TS-002 DCL competition:
+      - Image: 640×360 px
+      - Gate outer: 2.7×2.7 m (frame border 0.6 m, inner opening 1.5×1.5 m)
+      - Camera: fx=fy=320, cx=320, cy=180, VFoV=90°
+      - Camera tilt: +20° up from body (camera looks slightly upward)
+      - Gate color: dark blue (DCL visual style, BGR ~(180, 30, 20))
+    """
 
     def __init__(self, config: dict | None = None) -> None:
         config = config or {}
+        # VADR-TS-002: 640×360
         self.width = config.get("image_width", 640)
-        self.height = config.get("image_height", 480)
-        self.gate_width = config.get("gate_real_width", 1.0)
-        self.gate_height = config.get("gate_real_height", 1.0)
+        self.height = config.get("image_height", 360)
+        # VADR-TS-002: outer gate 2.7m, inner 1.5m
+        self.gate_outer = config.get("gate_outer_width", 2.7)
+        self.gate_inner = config.get("gate_inner_width", 1.5)
+        # Backward-compat alias
+        self.gate_width = self.gate_inner
+        self.gate_height = self.gate_inner
 
+        # VADR-TS-002 camera intrinsics: fx=fy=320, cx=320, cy=180
         cam_cfg = config.get("camera", {})
         if cam_cfg:
             self.intrinsics = CameraIntrinsics.from_config(cam_cfg)
         else:
-            fov = config.get("camera_fov", 90)
-            self.intrinsics = CameraIntrinsics.from_fov(fov, self.width, self.height)
+            self.intrinsics = CameraIntrinsics(
+                fx=config.get("fx", 320.0),
+                fy=config.get("fy", 320.0),
+                cx=config.get("cx", float(self.width) / 2),
+                cy=config.get("cy", float(self.height) / 2),
+            )
 
-        # Gate model corners in 3D (same convention as DepthEstimator)
-        hw, hh = self.gate_width / 2.0, self.gate_height / 2.0
-        self._gate_3d = np.array([
-            [-hw,  hh, 0],
-            [ hw,  hh, 0],
-            [ hw, -hh, 0],
-            [-hw, -hh, 0],
+        # Camera tilt: +20° upward (camera looks 20° above body X axis)
+        tilt_deg = config.get("camera_tilt_deg", 20.0)
+        self._cam_tilt_rad = np.radians(tilt_deg)
+
+        # Outer gate corners (4 corners of 2.7×2.7 m square, front face)
+        ho = self.gate_outer / 2.0
+        self._outer_3d = np.array([
+            [-ho,  ho, 0],
+            [ ho,  ho, 0],
+            [ ho, -ho, 0],
+            [-ho, -ho, 0],
         ], dtype=np.float64)
 
+        # Inner gate corners (1.5×1.5 m opening)
+        hi = self.gate_inner / 2.0
+        self._inner_3d = np.array([
+            [-hi,  hi, 0],
+            [ hi,  hi, 0],
+            [ hi, -hi, 0],
+            [-hi, -hi, 0],
+        ], dtype=np.float64)
+
+        # Backward-compat
+        self._gate_3d = self._outer_3d
+
         # Randomization ranges
-        self._dist_range = (1.0, 15.0)
-        self._offset_range = (-2.0, 2.0)
+        self._dist_range = (2.0, 15.0)
+        self._offset_range = (-2.5, 2.5)
         self._rot_range = np.radians(45)
+
+        # Tilt rotation matrix: rotate camera frame down by tilt angle
+        # (equivalent to camera looking up by tilt_deg)
+        ct = np.cos(self._cam_tilt_rad)
+        st = np.sin(self._cam_tilt_rad)
+        # Rotate around X axis by -tilt (gate moves up in image)
+        self._R_tilt = np.array([
+            [1,   0,   0],
+            [0,  ct, -st],
+            [0,  st,  ct],
+        ], dtype=np.float64)
 
     def generate_sample(self, rng: np.random.Generator | None = None) -> SyntheticSample:
         """Generate one synthetic training sample."""
@@ -156,61 +201,79 @@ class GateDataGenerator:
     def _render_gate(
         self, image: np.ndarray, rng: np.random.Generator
     ) -> GateAnnotation | None:
-        """Render a single gate onto the image and return annotation."""
-        # Random pose
+        """Render a single gate (outer frame + inner opening) onto the image.
+
+        Uses VADR-TS-002 gate geometry (2.7m outer, 1.5m inner) and
+        applies camera tilt of +20° upward.
+        """
+        # Random pose in front of camera
         distance = rng.uniform(*self._dist_range)
         offset_x = rng.uniform(*self._offset_range)
         offset_y = rng.uniform(*self._offset_range)
         rot_y = rng.uniform(-self._rot_range, self._rot_range)
         rot_x = rng.uniform(-self._rot_range * 0.3, self._rot_range * 0.3)
 
-        # Build rotation matrix
         rvec = np.array([rot_x, rot_y, 0.0])
         R, _ = cv2.Rodrigues(rvec)
 
-        # Translation
         tvec = np.array([offset_x, offset_y, distance])
 
-        # Project corners
         K = self.intrinsics.matrix
-        pts_3d = (R @ self._gate_3d.T).T + tvec
-        # Check all points in front of camera
-        if np.any(pts_3d[:, 2] <= 0.1):
+
+        def _project(pts_3d_local: np.ndarray) -> np.ndarray | None:
+            pts = (R @ pts_3d_local.T).T + tvec
+            # Apply camera tilt: rotate 3D points by tilt matrix
+            pts = (self._R_tilt @ pts.T).T
+            if np.any(pts[:, 2] <= 0.1):
+                return None
+            px = np.zeros((len(pts), 2))
+            for i in range(len(pts)):
+                p = K @ pts[i]
+                px[i] = p[:2] / p[2]
+            return px
+
+        outer_2d = _project(self._outer_3d)
+        inner_2d = _project(self._inner_3d)
+        if outer_2d is None or inner_2d is None:
             return None
 
-        pts_2d = np.zeros((4, 2))
-        for i in range(4):
-            p = K @ pts_3d[i]
-            pts_2d[i] = p[:2] / p[2]
-
-        # Check all corners in frame
-        margin = -20
-        if (np.any(pts_2d[:, 0] < margin) or np.any(pts_2d[:, 0] >= self.width - margin)
-                or np.any(pts_2d[:, 1] < margin) or np.any(pts_2d[:, 1] >= self.height - margin)):
+        # Check outer corners are visible (with margin)
+        margin = -30
+        all_pts = outer_2d
+        if (np.any(all_pts[:, 0] < margin) or np.any(all_pts[:, 0] >= self.width - margin)
+                or np.any(all_pts[:, 1] < margin) or np.any(all_pts[:, 1] >= self.height - margin)):
             return None
 
-        # Draw gate frame (thick colored lines)
-        color = (
-            int(rng.integers(0, 50)),
-            int(rng.integers(0, 50)),
-            int(rng.integers(180, 255)),
-        )  # reddish
-        pts_int = pts_2d.astype(np.int32)
-        thickness = max(2, int(30 / distance))
+        # Gate color: dark blue (DCL style) with slight variation
+        blue_b = int(rng.integers(150, 210))
+        blue_g = int(rng.integers(20, 50))
+        blue_r = int(rng.integers(10, 40))
+        gate_color = (blue_b, blue_g, blue_r)  # BGR
+
+        outer_int = outer_2d.astype(np.int32)
+        inner_int = inner_2d.astype(np.int32)
+        thickness = max(3, int(25.0 / distance))
+
+        # Fill outer polygon (gate frame material)
+        cv2.fillPoly(image, [outer_int], gate_color)
+        # Fill inner polygon dark (the hole you fly through)
+        cv2.fillPoly(image, [inner_int], (15, 15, 15))
+        # Bright highlight edges on outer frame
+        bright = (min(255, blue_b + 60), min(255, blue_g + 30), min(255, blue_r + 20))
         for j in range(4):
-            cv2.line(image, tuple(pts_int[j]), tuple(pts_int[(j + 1) % 4]), color, thickness)
+            cv2.line(image, tuple(outer_int[j]), tuple(outer_int[(j + 1) % 4]), bright, thickness)
 
-        # Build annotation
-        x_min, y_min = pts_2d.min(axis=0).astype(int)
-        x_max, y_max = pts_2d.max(axis=0).astype(int)
-        x_min = max(0, x_min)
-        y_min = max(0, y_min)
+        # Annotation: bbox covers outer gate
+        x_min = int(max(0, outer_2d[:, 0].min()))
+        y_min = int(max(0, outer_2d[:, 1].min()))
+        x_max = int(min(self.width, outer_2d[:, 0].max()))
+        y_max = int(min(self.height, outer_2d[:, 1].max()))
         bbox = (x_min, y_min, x_max - x_min, y_max - y_min)
-        center = (int(pts_2d[:, 0].mean()), int(pts_2d[:, 1].mean()))
+        center = (int(inner_2d[:, 0].mean()), int(inner_2d[:, 1].mean()))
 
         return GateAnnotation(
             bbox=bbox,
-            corners=pts_2d,
+            corners=outer_2d,
             center=center,
             distance=distance,
         )
