@@ -19,7 +19,7 @@ The **AI Grand Prix** is a global autonomous drone racing competition by **Andur
 | Physical Qualifier | September 2026 | In-person, Southern California (2 weeks) |
 | AI Grand Prix Final | November 2026 | Columbus, Ohio - live head-to-head racing |
 
-**Upcoming**: Interface specifications, I/O definitions, submission instructions, and exact dates to be shared in coming weeks.
+**Spec oficial**: VADR-TS-002 Issue 00.02 (2026-05-08) — MAVLink2/UDP interface released. See `260508_Technical_Spec_0002.pdf`.
 
 ## Technical Requirements
 
@@ -27,16 +27,20 @@ The **AI Grand Prix** is a global autonomous drone racing competition by **Andur
 An autonomous system that navigates a drone through a sequence of gates in a virtual environment, as fast as possible.
 
 ### Round 1 Format (1st Virtual Qualifier)
-- **Platform**: Windows-based downloadable application built on DCL's competition platform
-- **Environment**: Virtual 3D racecourse, no visual gimmicks, focused purely on autonomy performance
-- **Course**: Structured racecourse with defined number of standardized gates
-- **Sequencing**: All gates must be passed in correct order
-- **Physics**: Realistic drone physics and flight dynamics
-- **Scoring**: Time-based — fastest valid run wins, but **primary goal is passing all gates**
-- **Emphasis**: Precision, stability, and speed under realistic physical constraints
-- **Hardware Req**: Mid-tier PC with dedicated GPU (exact specs TBD); competition ensures coding skill wins over hardware budget
-- **Submission**: Python autonomy stack integrated into simulator, executed in controlled evaluation environment
-- **IP**: Full ownership retained; organizers only use code for judging/monitoring during competition period
+- **Platform**: Windows 11 app (DCL sim). Linux **not supported**.
+- **Interface**: MAVLink2 over UDP (MAVSDK-compatible). No REST/gRPC/custom API.
+- **Control**: `SET_POSITION_TARGET_LOCAL_NED` or `SET_ATTITUDE_TARGET` — client's choice
+- **Telemetry**: `ATTITUDE` (quat) + `HIGHRES_IMU` (accel, gyro, vel) + `TIMESYNC`. **No GPS, no global position.**
+- **Vision**: Forward camera, 640×360 @ 30Hz, tilt +20° up, UDP port 5600, JPEG chunks with 24-byte header. **Pinhole: fx=fy=320, cx=320, cy=180, VFoV=90°**
+- **Coordinates**: NED (X north, Y east, Z down). Origin = arming point (0,0,0).
+- **Physics**: Rigid body 120Hz (thrust, drag, gravity, collision)
+- **Gates**: Outer 2700×2700×260mm, inner opening 1500×1500mm
+- **Drone**: 280×280×160mm chassis (Neros Technologies)
+- **Course VQ1**: <10 gates, max 8 min, primary goal = completion
+- **Course VQ2**: <20 gates, faster time wins
+- **Hardware min**: i5-10400F, RTX 2060 Super (8GB VRAM), 16GB RAM, 60GB storage
+- **Internet**: active connection required (anti-cheat)
+- **IP**: Full ownership retained
 
 ### Three Core Pillars
 1. **Gate Recognition (Perception)**: Detect and locate gates using sensor data + visual feed. Gates are mostly standardized.
@@ -52,50 +56,73 @@ An autonomous system that navigates a drone through a sequence of gates in a vir
 - No entry fees
 
 ### Hardware (Provided)
-- Identical drones built by **Neros Technologies**
-- Incorporates **DCL's AI vector module**
-- Detailed specs TBD (will be released closer to qualifiers)
+- Identical drones built by **Neros Technologies**, incorporates DCL AI vector module
+- Chassis: 280×280×160mm
+- Gate outer: 2700×2700×260mm; inner opening: 1500×1500mm
 
 ## Development Strategy
 
-### Approach: Hybrid Stack (Classical + ML)
-We pursue a hybrid approach combining:
-- **Classical control** for precise drone dynamics (PID/MPC controllers)
-- **Computer vision** for gate detection (CNN-based, potentially YOLO/custom)
-- **Reinforcement learning** for optimal path planning and racing strategy
-- **Minimum jerk trajectory planning** for smooth high-speed flight
+### Approach: MAVLink-Native Stack (VADR-TS-002 compliant)
+
+**CRITICAL**: Internal gym_env stack is incompatible with real DCL interface. Full rebuild underway.
+
+Real interface: MAVLink2/UDP, NED coordinates, no GPS, mandatory vision, Windows 11 only.
+
+Strategy: mock-first (build faithful VADR-TS-002 mock + autonomy stack; swap IP when DCL binary releases).
+
+Pillars:
+- **MAVLink client** (pymavlink): heartbeat, ATTITUDE+IMU recv, POSITION_TARGET_LOCAL_NED send, vision stream UDP 5600
+- **State estimation**: quaternion attitude + linear velocity integration (no GPS)
+- **NED path planner**: gate-to-gate waypoints in NED, lookahead velocity
+- **Vision CNN**: YOLOv8n trained on synthetic 640×360 gate images (tilt +20°), fallback HSV detector
+- **Mock DCL sim**: faithful UDP server for development/validation before official binary
 
 ### Architecture
+
+**Phase 6 target (MAVLink-native, NED):**
 ```
 src/aigrandprix/
-├── config.py                 # Configuration loading & defaults
-├── main.py                   # Entry point / competition submission
-├── perception/               # Gate detection, visual processing
-│   ├── gate_detector.py      # Gate detection with fallback chain & monitoring
-│   ├── cnn_model.py          # CNN architecture for gate detection (no trained weights yet)
-│   ├── data_generator.py     # Synthetic training data generation
-│   ├── depth_estimation.py   # Distance to gate
-│   └── state_estimator.py    # Drone state from sensors
-├── control/                  # Flight dynamics control
-│   ├── drone_controller.py   # PID controller with physics mode dispatch
-│   ├── mpc_controller.py     # Model Predictive Control (linear QP)
-│   └── drone_dynamics.py     # Physics model
-├── planning/                 # Path planning & navigation
-│   ├── path_planner.py       # Gate-to-gate trajectory with altitude safety
-│   ├── trajectory_opt.py     # Minimum-jerk / time-optimal / min-snap
-│   └── race_strategy.py      # Overall race optimization
-├── simulation/               # Sim interface & training
-│   ├── sim_interface.py      # Abstract simulator interface
-│   ├── gym_env.py            # Gymnasium environment wrapper
-│   └── run_sim.py            # Simulation runner (config-driven)
-├── submission/               # DCL competition submission interface
-│   ├── entry_point.py        # AutonomousRacer facade
-│   ├── dcl_adapter.py        # DCL platform adapter (stub)
-│   ├── type_converters.py    # Observation/command/gate converters
-│   └── safety.py             # SafeActionWrapper (latency, exceptions, hover fallback)
+├── comms/                    # NEW — MAVLink2/UDP interface
+│   ├── mavlink_client.py     # pymavlink client, heartbeat, recv ATTITUDE+IMU, send POSITION_TARGET
+│   └── vision_stream.py      # UDP 5600 JPEG chunk reassembler (header 24B, LE)
+├── mock_sim/                 # NEW — Mock DCL sim for dev/validation
+│   ├── dcl_mock_server.py    # UDP MAVLink2 server + vision publisher
+│   ├── physics_6dof.py       # 6DOF rigid body 120Hz integrator
+│   └── gate_renderer.py      # OpenCV gate projection (pinhole, tilt +20°)
+├── state/                    # NEW — State estimation (no GPS)
+│   └── state_estimator.py    # quat(ATTITUDE) + vel_ned integration from HIGHRES_IMU
+├── perception/               # UPDATED
+│   ├── gate_detector.py      # CNN (YOLOv8n) + HSV fallback, output: bearing NED + dist estimate
+│   ├── cnn_model.py          # YOLOv8n weights (trained on synthetic 640×360 gates, tilt +20°)
+│   └── data_generator.py     # Synthetic gate dataset: 2.7m outer, NED, tilt +20°, varied bg
+├── planning/                 # REFACTORED to NED
+│   └── path_planner.py       # NED waypoints → POSITION_TARGET_LOCAL_NED
+├── control/                  # LEGACY (gym_env mode, preserved for regression)
+│   ├── drone_controller.py   # PID (ENU, simplified physics) — do not break
+│   └── mpc_controller.py     # MPC — preserved for Round 2
+├── simulation/               # LEGACY (gym_env) — preserved, 243 tests
+│   ├── gym_env.py
+│   └── run_sim.py
+├── submission/               # STUB — awaiting DCL API
+│   └── entry_point.py
+├── run_vq1.py                # NEW — single entry point: python run_vq1.py --host X --mavlink_port Y
 └── utils/
-    └── math_utils.py         # Shared math utilities
+    └── math_utils.py
 ```
+
+**Key MAVLink messages (VADR-TS-002):**
+
+| Message | Direction | Purpose |
+|---------|-----------|---------|
+| HEARTBEAT | both | Connection keepalive (≥2Hz from client) |
+| ATTITUDE | Sim→Client | Vehicle attitude (quat, rates) |
+| HIGHRES_IMU | Sim→Client | Accel, gyro, linear velocity |
+| TIMESYNC | Sim→Client | Clock sync |
+| SET_POSITION_TARGET_LOCAL_NED | Client→Sim | Primary control command |
+| SET_ATTITUDE_TARGET | Client→Sim | Alternative (reserved Round 2) |
+
+**Coordinate convention:** NED. X=north, Y=east, Z=down. Altitude = -Z.
+**Camera:** forward, tilt +20° up from body. Frame 640×360. fx=fy=320, cx=320, cy=180, VFoV=90°.
 
 ### Key Reference Repositories
 
@@ -309,18 +336,33 @@ New `src/aigrandprix/submission/` module for competition integration:
 
 ## Current Status & Remaining Work
 
-### What Works
-- 100% gate completion in simplified physics (200/200 episodes, 0 crashes)
-- PID controller with physics-mode dispatch (simplified + full dynamics)
-- MPC controller (linear QP, <1ms solve time)
-- DCL submission interface scaffolding
-- Comprehensive test suite (243 tests, all passing)
+### Phase 5 Legacy (gym_env internal sim)
+- 100% gate completion in simplified physics (200/200 episodes, 0 crashes) — **does not transfer to DCL**
+- PID + MPC controllers work in gym_env mode
+- 243 tests passing (preserved as regression suite)
 
-### What Remains
-1. **Full dynamics mode**: works structurally but is not the default; hasn't achieved 100% gate completion yet
-2. **Speed optimization**: gate completion is reliable but flight speed can be improved significantly
-3. **CNN gate detector**: architecture exists (`cnn_model.py`) but has no trained weights
-4. **No training pipeline**: no RL or supervised training loop implemented
-5. **Sim returns blank images**: no visual rendering — perception runs on gate position data, not vision
-6. **Visual detections not integrated**: gate detector output not wired into planning loop
-7. **DCL platform integration**: adapter is a stub pending DCL API specification release
+### Phase 6 — VQ1 Readiness (deadline 2026-05-23)
+
+**CRITICAL GAP**: Internal stack is structurally incompatible with real DCL interface (MAVLink2/UDP, NED, no GPS, mandatory vision). Full rebuild required.
+
+See `NEXT_STEPS.md` for full 6-track plan. Summary:
+
+| Track | Status | Deadline |
+|-------|--------|----------|
+| A — MAVLink Client | Not started | 2026-05-20 |
+| B — Mock DCL Sim | Not started | 2026-05-21 |
+| C — NED Refactor + State Estimation | Not started | 2026-05-20 |
+| D — Vision CNN (YOLOv8n) | Not started | 2026-05-22 |
+| E — Planner/Controller Adapter (NED + POSITION_TARGET) | Not started | 2026-05-22 |
+| F — Integration + Windows CI | Not started | 2026-05-23 |
+
+**Sim DCL binary**: not yet released (as of 2026-05-17). Strategy: build against mock, swap IP when binary releases.
+
+### What Remains (ordered by priority)
+1. **MAVLink client** (pymavlink): heartbeat, recv ATTITUDE+HIGHRES_IMU, recv vision UDP 5600, send POSITION_TARGET_LOCAL_NED
+2. **Mock DCL sim**: faithful VADR-TS-002 server — only way to validate before official binary
+3. **NED refactor**: all coordinates ENU→NED across planning + control + perception
+4. **State estimator**: pos from vel integration, yaw from quat, no GPS
+5. **Vision CNN**: train YOLOv8n on synthetic 640×360 gates with +20° tilt. Fallback: HSV blue detector
+6. **run_vq1.py**: single entry point `python run_vq1.py --host X --port Y`
+7. **Windows 11 / Python 3.14.2** validated environment
