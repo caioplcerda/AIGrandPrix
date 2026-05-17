@@ -249,7 +249,10 @@ class DCLMockServer:
             srcSystem=self._sysid,
             srcComponent=self._compid,
         )
-        self._mav.signing.secret_key = None  # no signing
+        try:
+            self._mav.signing.secret_key = None  # no signing
+        except AttributeError:
+            pass
 
         # Vision stream socket (send only)
         self._vision_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -278,7 +281,8 @@ class DCLMockServer:
                     msgs = self._mav.parse_buffer(data)  # type: ignore[attr-defined]
                     if msgs:
                         for msg in msgs:
-                            self._handle_msg(msg, addr)
+                            if msg is not None:
+                                self._handle_msg(msg, addr)
                 except Exception:
                     pass
         except BlockingIOError:
@@ -383,22 +387,40 @@ class DCLMockServer:
         try:
             accel = self._physics.body_frame_accel()
             t_us = int(state.time_s * 1e6) & 0xFFFFFFFFFFFFFFFF
-            buf = self._mav.highres_imu_encode(  # type: ignore[attr-defined]
-                time_usec=t_us,
-                xacc=float(accel[0]),
-                yacc=float(accel[1]),
-                zacc=float(accel[2]),
-                xgyro=float(state.roll_rate),
-                ygyro=float(state.pitch_rate),
-                zgyro=float(state.yaw_rate),
-                xmag=0.0, ymag=0.0, zmag=0.0,
-                abs_pressure=101325.0,
-                diff_pressure=0.0,
-                pressure_alt=float(-state.pos[2]),
-                temperature=25.0,
-                fields_updated=0xFFF,
-                id=0,
-            ).pack(self._mav)
+            try:
+                buf = self._mav.highres_imu_encode(  # type: ignore[attr-defined]
+                    time_usec=t_us,
+                    xacc=float(accel[0]),
+                    yacc=float(accel[1]),
+                    zacc=float(accel[2]),
+                    xgyro=float(state.roll_rate),
+                    ygyro=float(state.pitch_rate),
+                    zgyro=float(state.yaw_rate),
+                    xmag=0.0, ymag=0.0, zmag=0.0,
+                    abs_pressure=101325.0,
+                    diff_pressure=0.0,
+                    pressure_alt=float(-state.pos[2]),
+                    temperature=25.0,
+                    fields_updated=0xFFF,
+                    id=0,
+                ).pack(self._mav)
+            except TypeError:
+                # MAVLink1 dialect omits the 'id' field
+                buf = self._mav.highres_imu_encode(  # type: ignore[attr-defined]
+                    time_usec=t_us,
+                    xacc=float(accel[0]),
+                    yacc=float(accel[1]),
+                    zacc=float(accel[2]),
+                    xgyro=float(state.roll_rate),
+                    ygyro=float(state.pitch_rate),
+                    zgyro=float(state.yaw_rate),
+                    xmag=0.0, ymag=0.0, zmag=0.0,
+                    abs_pressure=101325.0,
+                    diff_pressure=0.0,
+                    pressure_alt=float(-state.pos[2]),
+                    temperature=25.0,
+                    fields_updated=0xFFF,
+                ).pack(self._mav)
             self._send_raw(buf)
         except Exception as exc:
             logger.debug("highres_imu send error: %s", exc)

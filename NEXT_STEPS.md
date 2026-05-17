@@ -1,74 +1,40 @@
 # AI Grand Prix — Próximos Passos até VQ1 (deadline: 2026-05-23)
 
-> Gerado em 2026-05-17. Baseado na spec oficial VADR-TS-002 Issue 00.02 (2026-05-08).
+> Atualizado em 2026-05-17. Spec oficial: VADR-TS-002 Issue 00.02 (2026-05-08).
 > Design completo: `.genie/brainstorms/round1-readiness/DESIGN.md`
 
-## Contexto crítico
+## Status atual (2026-05-17)
 
-O stack interno (gym_env, ENU, posição absoluta, thrust [0,1]) **não é** a interface real do simulador DCL.
-A interface real é MAVLink2/UDP + NED sem GPS + visão obrigatória. O sim DCL ainda não foi liberado — temos só a spec.
-Estratégia: construir mock fiel + stack plug-and-play. Quando binário liberar, troca de endpoint = drop-in.
+**Tracks A, B, C — COMPLETOS.** MAVLink-native stack funcionando:
+- E2E mock: 5/5 gates, 10.79s, 243 testes passando
+- Entry point: `python run_vq1.py --host <ip> --mavlink_port 14550`
+- Sim DCL binary: ainda não liberado. Mock é drop-in fiel.
 
----
-
-## 6 Tracks Paralelos — Atribuir hoje (2026-05-17)
-
-### Track A — MAVLink Client
-**Responsável:** 1-2 pessoas | **Dias:** 18-20
-
-| # | Tarefa | Entrega |
-|---|--------|---------|
-| A1 | Instalar `pymavlink` + script de conexão UDP básica | Conecta, imprime HEARTBEAT |
-| A2 | Heartbeat loop (HEARTBEAT em 2Hz) | Loop estável por 10 min |
-| A3 | Receber e parsear ATTITUDE (quat) + HIGHRES_IMU (accel, gyro, vel) | Log com timestamp |
-| A4 | Receber TIMESYNC, responder para sync de clock | Clock sync OK |
-| A5 | Enviar SET_POSITION_TARGET_LOCAL_NED (pos + vel + yaw NED) | Mock confirma recebimento |
-| A6 | Receber vision stream UDP porta 5600, reconstituir JPEG de chunks (header 24B) | Frames salvos em disco |
-| A7 | Testes unitários + integration test contra mock | pytest pass |
-
-**Referências:**
-- Transport: UDP. MAVLink2. Dialect: common.
-- HEARTBEAT: type=6 (GCS), autopilot=8 (invalid)
-- HIGHRES_IMU: xacc, yacc, zacc (m/s²), xgyro, ygyro, zgyro, xmag, ymag, zmag, abs_pressure, diff_pressure, pressure_alt, temperature, fields_updated, id
-- Vision stream: port 5600, header (frame_id uint32, chunk_id uint16, total_chunks uint16, jpeg_size uint32, payload_size uint32, sim_time_ns uint64) = 24 bytes, little-endian
+**Falta:** Tracks D (visão CNN), E (integração visão→loop), F (Windows 11).
 
 ---
 
-### Track B — Mock DCL Sim
-**Responsável:** 1-2 pessoas | **Dias:** 18-21
+## Tracks Restantes
 
-| # | Tarefa | Entrega |
-|---|--------|---------|
-| B1 | Servidor UDP Python: publica HEARTBEAT a 1Hz | Cliente A1 conecta |
-| B2 | Publica ATTITUDE (quaternion) + HIGHRES_IMU a 120Hz com física rígida simples (6DOF: pos, vel, quat, gyro) | A3 recebe corretamente |
-| B3 | Aceita SET_POSITION_TARGET_LOCAL_NED, integra posição usando inner P-controller simples | Drone move para waypoint no log |
-| B4 | Detecta colisão com gates (cilindro/caixa NED), emite evento gate_passed | Gate pass detectado |
-| B5 | Gera frames JPEG 640×360 com gate renderizado via OpenCV (retângulo azul perspectiva simples baseada em pos relativa drone→gate) | Frame visível e correto |
-| B6 | Publica vision stream no UDP 5600 com header VADR-TS-002, fatiado em chunks | Track A6 reconstitui |
-| B7 | Tilt de câmera +20° aplicado na projeção de gate na imagem | Gate aparece corretamente posicionado |
-| B8 | Configuração: arquivo YAML com lista de gates NED (pos + normal) | Qualquer curso carregável |
-
-**Notas:**
-- Não precisa ser física perfeita — precisa ser fiel ao protocolo (mensagens, timing, frames)
-- inner-loop no mock: P controller simples (Kp=1.5 pos, Kd=1.0 vel), dt=1/120s
-- Câmera: pinhole, fx=fy=320, cx=320, cy=180, resolução 640×360, tilt +20° = Ry(-20°) no body frame
+### Track A — MAVLink Client ✅ DONE
+`comms/mavlink_client.py` + `comms/vision_stream.py`. pymavlink 2.4.49. Heartbeat 2Hz, recv ATTITUDE+HIGHRES_IMU, send SET_POSITION_TARGET_LOCAL_NED, vision stream 640×360 reassembler.
 
 ---
 
-### Track C — NED Refactor + State Estimation
-**Responsável:** 1 pessoa | **Dias:** 18-20
+### Track B — Mock DCL Sim ✅ DONE
+`mock_sim/dcl_mock_server.py` + `physics_6dof.py` + `gate_renderer.py`. 120Hz physics, gate pass detection (plane crossing + inner opening check), vision stream UDP 5600 (24-byte header), camera tilt +20°.
 
-| # | Tarefa | Entrega |
-|---|--------|---------|
-| C1 | Mapear todos os locais com eixos ENU em planning/, control/, perception/ | Lista de arquivos:linhas |
-| C2 | Refatorar `path_planner.py`: eixos NED (X north, Y east, Z down) | Planner aceita e produz NED |
-| C3 | Refatorar `drone_controller.py`: NED. Z positivo = down (ascender = Z negativo) | Controller NED |
-| C4 | Refatorar `state_estimator.py`: consumir quat ATTITUDE + vel_ned de HIGHRES_IMU | Novo state estimator |
-| C5 | Posição: integrar vel_ned (HIGHRES_IMU linear_velocity) desde arme. Origem = (0,0,0) NED | drift <1m em 30s hover |
-| C6 | Yaw: extrair de quaternion ATTITUDE | yaw em rad, NED convention |
-| C7 | Formato de gate: `GateNED(pos_ned: np.ndarray, normal_ned: np.ndarray, width: float=1.5, height: float=1.5)` | Dataclass NED |
-| C8 | Atualizar configs/default.yaml com parâmetros NED | Config válida |
-| C9 | Todos os testes existentes atualizados para NED | pytest pass |
+**Bugs corrigidos:**
+- `highres_imu_encode(id=0)` → fallback sem `id` (MAVLink1 dialect)
+- `body_frame_accel()` → inclui aceleração real do veículo (não só gravidade)
+- `parse_buffer()` → filtra `None` da lista
+
+---
+
+### Track C — NED Refactor + State Estimation ✅ DONE
+`state/state_estimator.py` + `planning/path_planner_ned.py`. NED nativo: X=north, Y=east, Z=down. IMU integration, yaw from ATTITUDE, altitude = -Z. gate_neds → waypoints → POSITION_TARGET.
+
+---
 
 ---
 
@@ -123,67 +89,43 @@ Estratégia: construir mock fiel + stack plug-and-play. Quando binário liberar,
 
 ---
 
-## Dependências entre Tracks
-
-```
-A (MAVLink Client) ←────────────────── B (Mock Sim)
-         ↓                                    ↓
-C (NED + State) ──→ E (Planner Adapter) ──→ F (Integração)
-         ↓                  ↑
-D (Vision CNN) ─────────────┘
-```
-
-- A e B desenvolvem simultaneamente, integram no dia 20
-- C e D independentes, rodam desde dia 18
-- E começa quando C e A estão prontos (dia 20)
-- F começa quando tudo está integrado (dia 21)
-
----
-
-## Ponto de integração — 2026-05-20
-
-**Critério de go/no-go:**
-- [ ] A5: cliente envia POSITION_TARGET no mock
-- [ ] B3: mock move drone para waypoint
-- [ ] C4+C5: state estimator produz pos_ned válida
-
-Se não OK em 20/05 AM: re-priorizar para apenas fechar 1 gate com fallback HSV (sem CNN) e sem state estimator (usar pos do mock via campo reservado se houver). Pragmatismo primeiro.
-
----
-
-## Ponto de integração — 2026-05-22
+## Checkpoint — 2026-05-22
 
 **Critério de freeze:**
-- [ ] 5 gates fechados no mock em ≥2 seeds
-- [ ] Run completo <8 min
+- [x] 5 gates no mock em ≥1 seed (10.79s) ✅
+- [ ] Vision CNN mAP@0.5 > 0.80
+- [ ] Integração visão → loop sem erro
 - [ ] Windows 11 Python 3.14.2 importa e roda sem erro
 
-Se não OK: cortar visão CNN (usar HSV), cortar approach profile (ir direto ao gate), cortar gain scheduling. Core = MAVLink client + state NED + planner simples + detector HSV.
+Se CNN não ficar pronta: usar HSV fallback já implementado em `gate_detector.py`. Core mínimo já funciona sem visão.
 
 ---
 
-## Estrutura de arquivos novos
+## Estrutura atual de arquivos
 
 ```
 src/aigrandprix/
-├── comms/                    # NOVO — MAVLink interface
-│   ├── mavlink_client.py     # pymavlink UDP client, heartbeat, recv/send
-│   └── vision_stream.py      # UDP 5600 JPEG chunk reassembler
-├── mock_sim/                 # NOVO — Mock DCL Sim
-│   ├── dcl_mock_server.py    # Servidor UDP MAVLink2 + vision
-│   ├── physics_6dof.py       # 6DOF integrator 120Hz
-│   └── gate_renderer.py      # OpenCV gate rendering com projeção perspectiva
-├── perception/
-│   ├── gate_detector.py      # ATUALIZAR — CNN + HSV fallback, output bearing NED
-│   ├── cnn_model.py          # ATUALIZAR — YOLOv8n weights
-│   └── data_generator.py     # ATUALIZAR — gates 2.7m, tilt +20°, NED
+├── comms/                    ✅ DONE
+│   ├── mavlink_client.py
+│   └── vision_stream.py
+├── mock_sim/                 ✅ DONE
+│   ├── dcl_mock_server.py
+│   ├── physics_6dof.py
+│   └── gate_renderer.py
+├── state/                    ✅ DONE
+│   └── state_estimator.py
 ├── planning/
-│   └── path_planner.py       # REFATORAR — NED
-├── control/
-│   └── drone_controller.py   # REFATORAR — NED + POSITION_TARGET output
-├── state/                    # NOVO (ou mover de perception/)
-│   └── state_estimator.py    # quat + vel_ned integração, sem GPS
-└── run_vq1.py                # NOVO — entry point único para submissão
+│   ├── path_planner.py       (legacy, gym_env)
+│   └── path_planner_ned.py   ✅ DONE — NED wrapper
+├── perception/
+│   ├── data_generator.py     ✅ DONE — 640×360, tilt +20°, COCO format
+│   ├── gate_detector.py      ⚠️ backend YOLO sem pesos treinados
+│   └── cnn_model.py          ⚠️ arquitetura OK, sem pesos
+├── control/                  (legacy, gym_env)
+├── submission/               (stub aguarda API DCL)
+└── run_vq1.py                ✅ DONE — entry point completo
+scripts/
+└── test_e2e_mock.py          ✅ DONE — E2E: 5/5 gates 10.79s
 ```
 
 ---

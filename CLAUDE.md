@@ -334,35 +334,70 @@ New `src/aigrandprix/submission/` module for competition integration:
 | Full suite | 243 tests | All pass |
 |-----------|-------|--------|
 
+## Phase 6 Results — MAVLink-Native Stack (VADR-TS-002)
+
+### What Was Built
+
+Full MAVLink2/UDP autonomy stack replacing the gym_env internal sim. All new code is NED-native.
+
+**New modules:**
+
+| Module | Purpose |
+|--------|---------|
+| `comms/mavlink_client.py` | pymavlink UDP client: heartbeat 2Hz, recv ATTITUDE+HIGHRES_IMU, send SET_POSITION_TARGET_LOCAL_NED |
+| `comms/vision_stream.py` | UDP 5600 JPEG chunk reassembler (24-byte LE header per VADR-TS-002) |
+| `mock_sim/dcl_mock_server.py` | Faithful VADR-TS-002 mock: MAVLink2/UDP, 120Hz physics, gate pass detection, vision stream |
+| `mock_sim/physics_6dof.py` | 6DOF rigid body at 120Hz with inner PD position controller |
+| `mock_sim/gate_renderer.py` | OpenCV gate projection: pinhole, fx=fy=320, +20° camera tilt, 640×360 |
+| `state/state_estimator.py` | NED state from ATTITUDE (yaw) + HIGHRES_IMU (accel integration, no GPS) |
+| `planning/path_planner_ned.py` | NED wrapper: GateNED → WaypointNED → SET_POSITION_TARGET_LOCAL_NED |
+| `run_vq1.py` | Single entry point: `python run_vq1.py --host <ip> --mavlink_port 14550` |
+| `scripts/test_e2e_mock.py` | E2E integration test vs mock server |
+
+**Key bugs fixed during Phase 6:**
+- `physics_6dof.body_frame_accel()` only returned gravity reaction (hover), not vehicle acceleration — state estimator could not track motion. Fixed: returns `R.T @ last_world_accel - g_body`.
+- `highres_imu_encode(id=0)` fails silently on MAVLink1 dialect (no `id` param). Fixed: try/except fallback without `id`.
+- `signing.secret_key = None` raised `AttributeError` on some pymavlink builds. Guarded.
+- `parse_buffer()` can include `None` in result list. Filtered.
+
+### E2E Benchmark — Mock Straight Course (5 gates, 12m spacing)
+
+| Metric | Result |
+|--------|--------|
+| Gates passed | 5/5 (100%) |
+| Time | 10.79 s |
+| Max speed | 6 m/s |
+| State estimation | IMU integration, ~0.5m error at 10s |
+| Control | 50Hz loop, cubic spline trajectory, lookahead 3m |
+
+### Test Results
+
+| Full suite | 243 tests | All pass |
+|-----------|-------|--------|
+
 ## Current Status & Remaining Work
 
-### Phase 5 Legacy (gym_env internal sim)
-- 100% gate completion in simplified physics (200/200 episodes, 0 crashes) — **does not transfer to DCL**
-- PID + MPC controllers work in gym_env mode
-- 243 tests passing (preserved as regression suite)
+### Phase 6 (MAVLink-native) — COMPLETE (as of 2026-05-17)
+- Tracks A, B, C done: MAVLink client, mock sim, NED state estimator, NED planner, entry point
+- E2E test passes: 5/5 gates, 10.79s, against mock server
+- 243 legacy tests preserved (gym_env regression suite)
 
-### Phase 6 — VQ1 Readiness (deadline 2026-05-23)
-
-**CRITICAL GAP**: Internal stack is structurally incompatible with real DCL interface (MAVLink2/UDP, NED, no GPS, mandatory vision). Full rebuild required.
-
-See `NEXT_STEPS.md` for full 6-track plan. Summary:
-
-| Track | Status | Deadline |
-|-------|--------|----------|
-| A — MAVLink Client | Not started | 2026-05-20 |
-| B — Mock DCL Sim | Not started | 2026-05-21 |
-| C — NED Refactor + State Estimation | Not started | 2026-05-20 |
-| D — Vision CNN (YOLOv8n) | Not started | 2026-05-22 |
-| E — Planner/Controller Adapter (NED + POSITION_TARGET) | Not started | 2026-05-22 |
-| F — Integration + Windows CI | Not started | 2026-05-23 |
+### Phase 7 — VQ1 Submission (deadline 2026-05-23)
 
 **Sim DCL binary**: not yet released (as of 2026-05-17). Strategy: build against mock, swap IP when binary releases.
 
+| Track | Status | Deadline |
+|-------|--------|----------|
+| A — MAVLink Client | ✅ Done | — |
+| B — Mock DCL Sim | ✅ Done | — |
+| C — NED Refactor + State Estimation | ✅ Done | — |
+| D — Vision CNN (YOLOv8n) | Not started | 2026-05-22 |
+| E — Vision → Planner integration | Not started | 2026-05-22 |
+| F — Windows 11 validation + submission | Not started | 2026-05-23 |
+
 ### What Remains (ordered by priority)
-1. **MAVLink client** (pymavlink): heartbeat, recv ATTITUDE+HIGHRES_IMU, recv vision UDP 5600, send POSITION_TARGET_LOCAL_NED
-2. **Mock DCL sim**: faithful VADR-TS-002 server — only way to validate before official binary
-3. **NED refactor**: all coordinates ENU→NED across planning + control + perception
-4. **State estimator**: pos from vel integration, yaw from quat, no GPS
-5. **Vision CNN**: train YOLOv8n on synthetic 640×360 gates with +20° tilt. Fallback: HSV blue detector
-6. **run_vq1.py**: single entry point `python run_vq1.py --host X --port Y`
-7. **Windows 11 / Python 3.14.2** validated environment
+1. **Train YOLOv8n**: `data_generator.py` is ready (640×360, +20° tilt, DCL gate colors). Generate 5k images, train, export `.pt` weights.
+2. **Integrate gate detector**: vision stream → gate_detector → bearing NED → position correction in `run_vq1.py` loop
+3. **Windows 11 / Python 3.14.2**: validate `pip install`, run `python run_vq1.py --host X` against mock
+4. **DCL binary drop-in**: when binary releases, change `--host` only — no code changes needed
+5. **Unit tests** for `comms/`, `mock_sim/`, `state/`, `path_planner_ned.py`

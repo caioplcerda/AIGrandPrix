@@ -87,6 +87,7 @@ class Physics6DOF:
         self._kd_pos = kd_pos
         self._kp_att = kp_att
         self._t = 0.0
+        self._last_world_accel = np.zeros(3)
 
     @property
     def state(self) -> PhysicsState:
@@ -122,6 +123,7 @@ class Physics6DOF:
             drag = np.zeros(3)
 
         total_acc = desired_acc + drag
+        self._last_world_accel = total_acc.copy()
 
         # ── Integrate velocity and position
         new_vel = s.vel + total_acc * dt
@@ -180,19 +182,14 @@ class Physics6DOF:
     def body_frame_accel(self) -> np.ndarray:
         """Return simulated body-frame specific force (what HIGHRES_IMU.xacc etc. would report).
 
-        Specific force = -gravity_in_body (reaction force, no gravity correction).
-        For HIGHRES_IMU emulation.
+        specific_force_body = R.T @ a_world - g_body
+        This lets the state estimator recover: world_accel = R @ specific_force + g_ned = a_world.
         """
         s = self._state
-        # Gravity in body frame = R_ned_to_body @ g_ned
         R = _rpy_to_R(s.roll, s.pitch, s.yaw)
         g_ned = np.array([0.0, 0.0, _G])
-        # Body-frame gravity = R.T @ g_ned (R = body_to_ned, R.T = ned_to_body)
         g_body = R.T @ g_ned
-        # Specific force ≈ -g_body for near-hover (ignores vehicle acceleration)
-        # For more accuracy: specific_force = R.T @ (true_accel_ned) - g_body...
-        # Simplified: return -g_body so hover gives [0,0,-9.81] in NED body
-        return -g_body
+        return R.T @ self._last_world_accel - g_body
 
 
 def _rpy_to_R(roll: float, pitch: float, yaw: float) -> np.ndarray:
