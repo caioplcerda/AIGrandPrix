@@ -193,11 +193,14 @@ class GateDetector:
         self._last_latency_ms = 0.0
 
         if config is not None:
-            self._gate_color_lower = np.array(config.get("gate_color_lower", [0, 100, 100]))
-            self._gate_color_upper = np.array(config.get("gate_color_upper", [10, 255, 255]))
-            self._area_filter = config.get("area_filter", 500)
-            self._focal_length = config.get("focal_length", 500)
-            self._gate_real_size = config.get("gate_real_size", 1.0)
+            # DCL gate: dark blue BGR ~(180,35,20) → HSV H≈108-122, S≈150-255, V≈20-200
+            self._gate_color_lower = np.array(config.get("gate_color_lower", [100, 120, 20]))
+            self._gate_color_upper = np.array(config.get("gate_color_upper", [130, 255, 210]))
+            self._area_filter = config.get("area_filter", 300)
+            # VADR-TS-002: fx=fy=320
+            self._focal_length = config.get("focal_length", 320)
+            # outer gate 2.7m used for distance estimate
+            self._gate_real_size = config.get("gate_real_size", 2.7)
             self._confidence_scale = config.get("confidence_scale", 5000)
             # CNN config
             cnn_cfg = config.get("cnn", {})
@@ -213,11 +216,13 @@ class GateDetector:
             else:
                 self._tracker = None
         else:
-            self._gate_color_lower = np.array([0, 100, 100])
-            self._gate_color_upper = np.array([10, 255, 255])
-            self._area_filter = 500
-            self._focal_length = 500
-            self._gate_real_size = 1.0
+            # DCL gate: dark blue BGR ~(180,35,20) → HSV H≈108-122, S≈150-255, V≈20-200
+            self._gate_color_lower = np.array([100, 120, 20])
+            self._gate_color_upper = np.array([130, 255, 210])
+            self._area_filter = 300
+            # VADR-TS-002: fx=fy=320; gate outer 2.7m
+            self._focal_length = 320
+            self._gate_real_size = 2.7
             self._confidence_scale = 5000
             self._cnn_backend = "custom"
             self._cnn_model_path = None
@@ -353,7 +358,40 @@ class GateDetector:
         if self._model is None:
             return []
 
+        if self._cnn_backend == "yolo":
+            return self._run_yolo(image)
         return self._run_centernet(image)
+
+    def _run_yolo(self, image: np.ndarray) -> list[GateDetection]:
+        """Run YOLOv8 inference and decode detections."""
+        import cv2
+
+        h, w = image.shape[:2]
+        results = self._model(image, verbose=False, conf=self._cnn_confidence)
+        detections = []
+        for result in results:
+            if result.boxes is None:
+                continue
+            for box in result.boxes:
+                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                conf = float(box.conf[0])
+                cx = int((x1 + x2) / 2)
+                cy = int((y1 + y2) / 2)
+                bw = x2 - x1
+                bh = y2 - y1
+                apparent = max(bw, bh) if max(bw, bh) > 0 else 1.0
+                dist = (self._gate_real_size * self._focal_length) / apparent
+                corners = np.array([
+                    [x1, y1], [x2, y1], [x2, y2], [x1, y2],
+                ], dtype=np.float32)
+                detections.append(GateDetection(
+                    center_px=(cx, cy),
+                    corners_px=corners,
+                    distance=dist,
+                    normal=np.array([0, 0, 1]),
+                    confidence=conf,
+                ))
+        return sorted(detections, key=lambda d: d.distance)
 
     def _load_model(self) -> object | None:
         """Load CNN model weights. Returns None if unavailable."""

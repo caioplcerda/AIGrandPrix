@@ -13,24 +13,28 @@ from aigrandprix.perception.gate_detector import (
 )
 
 
-def _make_blank_image(h: int = 480, w: int = 640) -> np.ndarray:
-    """Create a blank dark BGR image."""
+def _make_blank_image(h: int = 360, w: int = 640) -> np.ndarray:
+    """Create a blank dark BGR image (VADR-TS-002 resolution)."""
     return np.zeros((h, w, 3), dtype=np.uint8)
 
 
-def _draw_red_rect(
+def _draw_blue_rect(
     image: np.ndarray,
     cx: int,
     cy: int,
     half_w: int = 40,
     half_h: int = 40,
 ) -> np.ndarray:
-    """Draw a filled red rectangle on the image (BGR: red = [0,0,255])."""
+    """Draw DCL-style dark blue gate rectangle (BGR ~(180,35,20))."""
     img = image.copy()
     y1, y2 = max(cy - half_h, 0), min(cy + half_h, img.shape[0])
     x1, x2 = max(cx - half_w, 0), min(cx + half_w, img.shape[1])
-    img[y1:y2, x1:x2] = [0, 0, 255]  # pure red in BGR
+    img[y1:y2, x1:x2] = [180, 35, 20]  # DCL gate color BGR
     return img
+
+
+# Keep backward-compat alias for other tests that may use red
+_draw_red_rect = _draw_blue_rect
 
 
 def _make_detection(pos: np.ndarray, gate_id: int = 0) -> GateDetection:
@@ -50,17 +54,16 @@ def _make_detection(pos: np.ndarray, gate_id: int = 0) -> GateDetection:
 # ---------------------------------------------------------------------------
 
 class TestColorDetection:
-    def test_detects_red_gate(self):
-        """A large red rectangle should be detected as a gate."""
+    def test_detects_dcl_blue_gate(self):
+        """DCL dark blue gate rectangle should be detected."""
         img = _make_blank_image()
-        img = _draw_red_rect(img, cx=320, cy=240, half_w=50, half_h=50)
+        img = _draw_blue_rect(img, cx=320, cy=180, half_w=50, half_h=50)
         detector = GateDetector(method="color")
         detections = detector.detect(img)
         assert len(detections) >= 1, "Should detect at least one gate"
         det = detections[0]
-        # Center should be near the drawn rectangle
-        assert abs(det.center_px[0] - 320) < 20
-        assert abs(det.center_px[1] - 240) < 20
+        assert abs(det.center_px[0] - 320) < 25
+        assert abs(det.center_px[1] - 180) < 25
 
     def test_no_detection_on_blank_image(self):
         """No gates should be detected on a blank image."""
@@ -69,29 +72,27 @@ class TestColorDetection:
         detections = detector.detect(img)
         assert len(detections) == 0
 
-    def test_no_detection_on_blue_image(self):
-        """Blue rectangles should NOT be detected as gates (HSV filter is for red)."""
+    def test_no_detection_on_red_image(self):
+        """Red rectangles should NOT be detected (HSV filter targets blue)."""
         img = _make_blank_image()
-        # Blue in BGR
-        img[200:280, 280:360] = [255, 0, 0]
+        img[140:220, 280:360] = [0, 0, 255]  # pure red BGR
         detector = GateDetector(method="color")
         detections = detector.detect(img)
         assert len(detections) == 0
 
     def test_small_contour_filtered(self):
-        """Very small red areas should be filtered out (< 500px area)."""
+        """Very small blue areas should be filtered out (< area_filter threshold)."""
         img = _make_blank_image()
-        # 10x10 = 100 pixels, below the 500 threshold
-        img = _draw_red_rect(img, cx=320, cy=240, half_w=5, half_h=5)
+        img = _draw_blue_rect(img, cx=320, cy=180, half_w=5, half_h=5)
         detector = GateDetector(method="color")
         detections = detector.detect(img)
-        assert len(detections) == 0, "Small red area should be filtered"
+        assert len(detections) == 0, "Small area should be filtered"
 
     def test_multiple_gates_detected(self):
-        """Multiple separated red rectangles should yield multiple detections."""
+        """Multiple separated blue rectangles should yield multiple detections."""
         img = _make_blank_image()
-        img = _draw_red_rect(img, cx=150, cy=240, half_w=40, half_h=40)
-        img = _draw_red_rect(img, cx=490, cy=240, half_w=40, half_h=40)
+        img = _draw_blue_rect(img, cx=150, cy=180, half_w=40, half_h=40)
+        img = _draw_blue_rect(img, cx=490, cy=180, half_w=40, half_h=40)
         detector = GateDetector(method="color")
         detections = detector.detect(img)
         assert len(detections) >= 2, f"Expected 2 detections, got {len(detections)}"
@@ -101,11 +102,11 @@ class TestColorDetection:
         detector = GateDetector(method="color")
 
         img_far = _make_blank_image()
-        img_far = _draw_red_rect(img_far, 320, 240, half_w=20, half_h=20)
+        img_far = _draw_blue_rect(img_far, 320, 180, half_w=20, half_h=20)
         det_far = detector.detect(img_far)
 
         img_close = _make_blank_image()
-        img_close = _draw_red_rect(img_close, 320, 240, half_w=80, half_h=80)
+        img_close = _draw_blue_rect(img_close, 320, 180, half_w=80, half_h=80)
         det_close = detector.detect(img_close)
 
         assert len(det_far) >= 1 and len(det_close) >= 1
@@ -116,7 +117,7 @@ class TestColorDetection:
     def test_confidence_bounded(self):
         """Confidence should be in [0, 1]."""
         img = _make_blank_image()
-        img = _draw_red_rect(img, 320, 240, half_w=50, half_h=50)
+        img = _draw_blue_rect(img, 320, 180, half_w=50, half_h=50)
         detector = GateDetector(method="color")
         for det in detector.detect(img):
             assert 0.0 <= det.confidence <= 1.0

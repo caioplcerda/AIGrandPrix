@@ -1,0 +1,21 @@
+# VQ1 submission requirements — pinned for reproducibility
+# Install: pip install -r requirements_vq1.txt
+#
+# Windows notes:
+#   - opencv-python-headless avoids Qt/GUI dependency issues on Windows Server / headless
+#   - torch: CPU-only is fine for inference; use torch+cu121 if CUDA available
+#   - pymavlink: may need Visual C++ Build Tools on Windows (usually installs fine via pip)
+#
+# Minimum hardware: i5-10400F, RTX 2060 Super (8GB VRAM), 16GB RAM (per VADR-TS-002)
+
+numpy>=1.24,<2.0
+scipy>=1.10
+opencv-python>=4.8
+torch>=2.1
+torchvision>=0.16
+pymavlink>=2.4
+ultralytics>=8.0
+pyyaml>=6.0
+
+# Optional: for HSV visualization / debug
+# matplotlib>=3.7

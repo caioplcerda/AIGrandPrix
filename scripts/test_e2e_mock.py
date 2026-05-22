@@ -34,7 +34,7 @@ _N_GATES = 5
 _MAX_DURATION_S = 90.0
 _LOOP_HZ = 50.0
 _MAX_SPEED = 6.0
-_GATE_PASS_RADIUS_M = 2.0
+_GATE_PASS_RADIUS_M = 1.5
 _REPLAN_INTERVAL_S = 1.5
 
 
@@ -134,17 +134,17 @@ def main() -> int:
             if stop_event.wait(timeout=0.0):
                 logger.info("Server confirmed completion at %.1f s", elapsed)
                 break
-            # Command past last gate so drone crosses plane
+            # Command well past last gate so drone fully crosses plane
             last_gate = gate_neds[-1]
-            exit_pos = last_gate.position + last_gate.normal * 3.0
+            exit_pos = last_gate.position + last_gate.normal * 6.0  # 6m past gate
             target = PositionTargetNED(
                 x=float(exit_pos[0]),
                 y=float(exit_pos[1]),
                 z=float(exit_pos[2]),
-                vx=float(last_gate.normal[0] * _MAX_SPEED * 0.5),
-                vy=float(last_gate.normal[1] * _MAX_SPEED * 0.5),
+                vx=float(last_gate.normal[0] * _MAX_SPEED),  # full speed through
+                vy=float(last_gate.normal[1] * _MAX_SPEED),
                 vz=0.0,
-                yaw=float(wp.yaw) if waypoints else 0.0,
+                yaw=0.0,
             )
             client.send_position_target(target)
             t_used = time.perf_counter() - t_loop
@@ -161,17 +161,22 @@ def main() -> int:
         state = estimator.update(telem)
 
         # Gate pass check (client-side by estimated distance)
+        # Use gate center position: advance only if approaching AND within radius
         remaining = gate_neds[next_gate_idx:]
         if remaining:
-            dist = float(np.linalg.norm(remaining[0].position - state.pos_ned))
-            if dist < _GATE_PASS_RADIUS_M:
+            g = remaining[0]
+            diff = g.position - state.pos_ned
+            dist = float(np.linalg.norm(diff))
+            # Check drone has crossed gate plane (dot product with normal flips sign)
+            past_gate = float(np.dot(diff, g.normal)) < 0
+            if dist < _GATE_PASS_RADIUS_M or past_gate:
                 logger.info(
                     "Gate %d in range (est dist=%.2fm) — advancing planner",
-                    remaining[0].gate_id, dist,
+                    g.gate_id, dist,
                 )
                 next_gate_idx += 1
                 waypoints = []
-                estimator.reset_position(remaining[0].position)
+                estimator.reset_position(g.position)
 
         # Replan
         remaining = gate_neds[next_gate_idx:]
