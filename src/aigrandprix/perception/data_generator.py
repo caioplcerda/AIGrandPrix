@@ -180,22 +180,61 @@ class GateDataGenerator:
         return coco
 
     def _random_background(self, rng: np.random.Generator) -> np.ndarray:
-        """Create a random background image."""
-        choice = rng.integers(0, 3)
+        """Create a random background image simulating indoor/outdoor race arenas."""
+        choice = rng.integers(0, 8)
         if choice == 0:
-            # Solid color
-            color = rng.integers(0, 200, size=3).tolist()
-            img = np.full((self.height, self.width, 3), color, dtype=np.uint8)
+            # Dark arena — most common DCL venue
+            base = rng.integers(5, 40, size=3).tolist()
+            img = np.full((self.height, self.width, 3), base, dtype=np.uint8)
         elif choice == 1:
-            # Vertical gradient
-            top = rng.integers(0, 200, size=3)
-            bot = rng.integers(0, 200, size=3)
+            # Vertical gradient (sky/ground)
+            top = rng.integers(0, 100, size=3)
+            bot = rng.integers(20, 120, size=3)
             rows = np.linspace(0, 1, self.height).reshape(-1, 1, 1)
             img = ((1 - rows) * top + rows * bot).astype(np.uint8)
             img = np.broadcast_to(img, (self.height, self.width, 3)).copy()
-        else:
-            # Random noise
+        elif choice == 2:
+            # Dark with stadium lights (bright blobs)
+            img = np.full((self.height, self.width, 3), rng.integers(5, 25, size=3).tolist(), dtype=np.uint8)
+            n_lights = rng.integers(2, 8)
+            for _ in range(n_lights):
+                lx = rng.integers(0, self.width)
+                ly = rng.integers(0, self.height // 2)
+                lr = rng.integers(10, 50)
+                brightness = int(rng.integers(120, 255))
+                cv2.circle(img, (int(lx), int(ly)), int(lr), (brightness, brightness, brightness), -1)
+                cv2.GaussianBlur(img, (31, 31), 0, dst=img)
+        elif choice == 3:
+            # Grass floor / outdoor (green-brown gradient + noise)
+            top_c = rng.integers(30, 80, size=3)
+            bot_c = np.array([rng.integers(20, 60), rng.integers(40, 100), rng.integers(20, 60)])
+            rows = np.linspace(0, 1, self.height).reshape(-1, 1, 1)
+            img = ((1 - rows) * top_c + rows * bot_c).astype(np.uint8)
+            img = np.broadcast_to(img, (self.height, self.width, 3)).copy()
+            noise = rng.integers(-15, 15, size=(self.height, self.width, 3))
+            img = np.clip(img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+        elif choice == 4:
+            # Textured dark floor (diagonal stripes pattern — arena markings)
+            img = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+            base_lum = int(rng.integers(15, 60))
+            img[:] = base_lum
+            stripe_w = int(rng.integers(20, 80))
+            for x in range(0, self.width + self.height, stripe_w * 2):
+                pts = np.array([[x, 0], [x + stripe_w, 0], [x + stripe_w - self.height, self.height], [x - self.height, self.height]])
+                cv2.fillPoly(img, [pts.astype(np.int32)], (base_lum + 15, base_lum + 15, base_lum + 15))
+        elif choice == 5:
+            # Overexposed (harsh outdoor lighting)
+            base = rng.integers(150, 220, size=3).tolist()
+            img = np.full((self.height, self.width, 3), base, dtype=np.uint8)
+            noise = rng.integers(0, 40, size=(self.height, self.width, 3), dtype=np.uint8)
+            img = np.clip(img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+        elif choice == 6:
+            # Random colored noise (worst-case clutter)
             img = rng.integers(0, 150, size=(self.height, self.width, 3), dtype=np.uint8)
+        else:
+            # Solid neutral
+            color = rng.integers(0, 180, size=3).tolist()
+            img = np.full((self.height, self.width, 3), color, dtype=np.uint8)
         return img
 
     def _render_gate(
@@ -279,15 +318,38 @@ class GateDataGenerator:
         )
 
     def _augment(self, image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-        """Apply random augmentations."""
+        """Apply random augmentations for sim-to-real robustness."""
         # Brightness/contrast
-        alpha = rng.uniform(0.7, 1.3)
-        beta = rng.uniform(-30, 30)
+        alpha = rng.uniform(0.5, 1.5)
+        beta = rng.uniform(-40, 40)
         image = np.clip(image.astype(np.float32) * alpha + beta, 0, 255).astype(np.uint8)
 
-        # Gaussian noise
-        if rng.random() < 0.5:
-            noise = rng.normal(0, 5, image.shape).astype(np.float32)
+        # Gaussian noise (image sensor noise)
+        if rng.random() < 0.6:
+            sigma = rng.uniform(2, 12)
+            noise = rng.normal(0, sigma, image.shape).astype(np.float32)
             image = np.clip(image.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+
+        # Motion blur (fast drone movement)
+        if rng.random() < 0.35:
+            ksize = int(rng.choice([3, 5, 7, 9]))
+            angle = rng.uniform(0, 180)
+            k = np.zeros((ksize, ksize))
+            k[ksize // 2, :] = 1.0
+            M = cv2.getRotationMatrix2D((ksize / 2, ksize / 2), angle, 1)
+            k = cv2.warpAffine(k, M, (ksize, ksize))
+            k /= k.sum() + 1e-8
+            image = cv2.filter2D(image, -1, k)
+
+        # JPEG compression artifact (like UDP video stream)
+        if rng.random() < 0.4:
+            quality = int(rng.integers(50, 95))
+            _, enc = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
+            image = cv2.imdecode(enc, cv2.IMREAD_COLOR)
+
+        # Gaussian blur (slight defocus)
+        if rng.random() < 0.2:
+            ksize = int(rng.choice([3, 5]))
+            image = cv2.GaussianBlur(image, (ksize, ksize), 0)
 
         return image
