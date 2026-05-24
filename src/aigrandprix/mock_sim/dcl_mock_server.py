@@ -197,6 +197,7 @@ class DCLMockServer:
             # Send MAVLink telemetry at 120 Hz
             self._send_attitude(state)
             self._send_highres_imu(state)
+            self._send_local_position(state)
 
             # Send HEARTBEAT at 1 Hz
             if elapsed - self._last_heartbeat >= _HEARTBEAT_INTERVAL:
@@ -424,6 +425,22 @@ class DCLMockServer:
             self._send_raw(buf)
         except Exception as exc:
             logger.debug("highres_imu send error: %s", exc)
+
+    def _send_local_position(self, state: PhysicsState) -> None:
+        try:
+            t_ms = int(state.time_s * 1000) & 0xFFFFFFFF
+            buf = self._mav.local_position_ned_encode(  # type: ignore[attr-defined]
+                time_boot_ms=t_ms,
+                x=float(state.pos[0]),
+                y=float(state.pos[1]),
+                z=float(state.pos[2]),
+                vx=float(state.vel[0]),
+                vy=float(state.vel[1]),
+                vz=float(state.vel[2]),
+            ).pack(self._mav)
+            self._send_raw(buf)
+        except Exception as exc:
+            logger.debug("local_position send error: %s", exc)
 
     def _send_timesync(self) -> None:
         try:

@@ -71,6 +71,12 @@ class TelemetryState:
     gyro_z: float = 0.0
     imu_timestamp_us: int = 0
 
+    # From LOCAL_POSITION_NED (true NED velocity if sim provides it)
+    vel_ned_x: float = 0.0   # NED vx m/s
+    vel_ned_y: float = 0.0
+    vel_ned_z: float = 0.0
+    has_ned_velocity: bool = False
+
     # Connection quality
     last_heartbeat_time: float = field(default_factory=time.time)
     connected: bool = False
@@ -185,6 +191,10 @@ class MAVLinkClient:
                 gyro_y=self._telemetry.gyro_y,
                 gyro_z=self._telemetry.gyro_z,
                 imu_timestamp_us=self._telemetry.imu_timestamp_us,
+                vel_ned_x=self._telemetry.vel_ned_x,
+                vel_ned_y=self._telemetry.vel_ned_y,
+                vel_ned_z=self._telemetry.vel_ned_z,
+                has_ned_velocity=self._telemetry.has_ned_velocity,
                 last_heartbeat_time=self._telemetry.last_heartbeat_time,
                 connected=self._telemetry.connected,
             )
@@ -291,6 +301,8 @@ class MAVLinkClient:
                     self._on_attitude(msg)
                 elif msg_type == "HIGHRES_IMU":
                     self._on_highres_imu(msg)
+                elif msg_type == "LOCAL_POSITION_NED":
+                    self._on_local_position(msg)
                 elif msg_type == "TIMESYNC":
                     self._on_timesync(msg)
             except Exception as exc:
@@ -324,6 +336,13 @@ class MAVLinkClient:
             self._telemetry.gyro_y = float(msg.ygyro)   # type: ignore[attr-defined]
             self._telemetry.gyro_z = float(msg.zgyro)   # type: ignore[attr-defined]
             self._telemetry.imu_timestamp_us = int(msg.time_usec)  # type: ignore[attr-defined]
+
+    def _on_local_position(self, msg: object) -> None:
+        with self._lock:
+            self._telemetry.vel_ned_x = float(msg.vx)  # type: ignore[attr-defined]
+            self._telemetry.vel_ned_y = float(msg.vy)  # type: ignore[attr-defined]
+            self._telemetry.vel_ned_z = float(msg.vz)  # type: ignore[attr-defined]
+            self._telemetry.has_ned_velocity = True
 
     def _on_timesync(self, msg: object) -> None:
         """Respond to TIMESYNC to maintain clock sync with simulator."""

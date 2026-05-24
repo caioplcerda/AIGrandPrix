@@ -85,12 +85,13 @@ class NEDStateEstimator:
     def __init__(
         self,
         initial_pos_ned: np.ndarray | None = None,
-        vel_decay: float = 0.995,
+        vel_decay: float = 1.0,
     ) -> None:
         """
         Args:
             initial_pos_ned: starting position in NED (default: origin)
-            vel_decay: per-step velocity decay to bound drift (0.99-1.0)
+            vel_decay: per-step velocity decay (1.0 = no decay; <1.0 bounds drift at cost
+                       of systematic underestimation at cruise since net accel ≈ 0)
         """
         self._pos = np.zeros(3) if initial_pos_ned is None else initial_pos_ned.copy()
         self._vel = np.zeros(3)
@@ -108,9 +109,16 @@ class NEDStateEstimator:
         self._last_time = None
         self._initialized = False
 
-    def reset_position(self, pos_ned: np.ndarray) -> None:
-        """Anchor position to known gate position (keeps velocity)."""
+    def reset_position(self, pos_ned: np.ndarray, *, reset_velocity: bool = False) -> None:
+        """Anchor position to known gate position.
+
+        Args:
+            pos_ned: known NED position anchor (e.g. gate center after passing)
+            reset_velocity: if True, zero velocity to remove accumulated drift
+        """
         self._pos = pos_ned.copy()
+        if reset_velocity:
+            self._vel = np.zeros(3)
 
     def update(self, telem: TelemetryState) -> NEDState:
         """Update estimate from latest MAVLink telemetry snapshot.
@@ -140,36 +148,19 @@ class NEDStateEstimator:
         # because accelerometer measures -g in body (reaction to gravity)
         # Specific force = a_body - g_body. So a_body = specific_force + g_body
         # g_body = R.T @ g_ned
-        accel_body = np.array([telem.accel_x, telem.accel_y, telem.accel_z])
-        g_body = R.T @ _GRAVITY_NED
-        # true_accel_body = accel_body + g_body ... but spec says HIGHRES_IMU xacc includes gravity
-        # For the real DCL sim, test empirically. Using: world_accel = R @ accel_body + g_ned
-        # This is the standard formula: rotate specific force to world, then add gravity to get
-        # true world acceleration. But this double-adds if specific_force already includes gravity...
-        # We'll use: world_accel = R @ accel_body - g_ned ... no.
-        #
-        # Correct derivation:
-        #   specific_force = accel_measured (no gravity)
-        #   true_world_accel = R @ specific_force + g_ned ... no
-        #
-        # Actually: accelerometer measures force_body / mass. For hover:
-        #   net_force = thrust_up - m*g = 0  → force_body = m*g (upward in body = -Z_body in NED)
-        #   So accel_body_measured (specific force) = [0, 0, -g] in NED body (Z down)
-        #   gravity in NED body = R.T @ [0,0,g] = [0, 0, g] when level
-        #   world_accel = R @ (accel_body_measured - R.T @ g_ned_corrections)... complex.
-        #
-        # Simplest working formula used in most drone stacks:
-        #   world_accel_ned = R @ accel_body + g_ned
-        # where g_ned = [0, 0, +9.81] (gravity points down = +Z in NED)
-        # This works because: accel_body from sensor = specific_force (no gravity),
-        # and R @ specific_force_body + g_ned = true acceleration in NED.
-        world_accel = R @ accel_body + _GRAVITY_NED
+        if telem.has_ned_velocity:
+            # Sim provides true NED velocity (LOCAL_POSITION_NED) — use directly, no drift.
+            self._vel = np.array([telem.vel_ned_x, telem.vel_ned_y, telem.vel_ned_z])
+        else:
+            # Fallback: integrate from IMU specific force.
+            # specific_force (accel_body) = kinematic_accel_body - gravity_body
+            # world_accel = R @ specific_force + g_ned = true kinematic accel in NED.
+            accel_body = np.array([telem.accel_x, telem.accel_y, telem.accel_z])
+            world_accel = R @ accel_body + _GRAVITY_NED
+            self._vel = self._vel * self._vel_decay + world_accel * dt
 
-        # Integrate velocity
-        self._vel = self._vel * self._vel_decay + world_accel * dt
-
-        # Integrate position
-        self._pos = self._pos + self._vel * dt + 0.5 * world_accel * dt * dt
+        # Integrate position from velocity
+        self._pos = self._pos + self._vel * dt
 
         return self._make_state()
 

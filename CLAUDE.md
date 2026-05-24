@@ -413,9 +413,12 @@ Weights: `datasets/gate_yolo_mps/runs/gate_detector2/weights/best.pt`
 | Metric | Result |
 |--------|--------|
 | Gates passed | 5/5 (100%) |
+| Time | ~9.8s avg (3-run mean) |
 | E2E test | PASS |
-| Control loop | 50 Hz, cubic spline, lookahead 3m |
+| Control loop | 50 Hz, cubic spline, lookahead 5m |
 | CNN validation | PASS (P=1.0, R=0.97, F1=0.98) |
+
+**Critical fix (2026-05-24)**: `vel_decay=0.995` in `NEDStateEstimator` created equilibrium velocity → 0 at cruise (net accel ≈ 0 when drag = thrust). Fixed by: (a) setting `vel_decay=1.0`, (b) sending `LOCAL_POSITION_NED` from mock server with true physics velocity, (c) estimator uses reported velocity directly when available. Before fix: gate 4 took 38s (49.88s total). After: ~10s total.
 
 ## Current Status
 
@@ -452,4 +455,4 @@ Windows note: if `pip install pymavlink` fails, use `pip install pymavlink --pre
 ### What Remains
 1. **Windows 11 validation**: run `pip install -r requirements_vq1.txt` + `test_e2e_mock.py` on Windows
 2. **DCL binary drop-in**: change `--host` only — no code changes needed
-3. **Training completion**: YOLOv8n still training (50 epochs, MPS) — `best.pt` auto-updates
+3. **YOLOv8n**: trained, validated (P=1.0, R=0.97). Weights at `datasets/gate_yolo_mps/runs/gate_detector2/weights/best.pt`

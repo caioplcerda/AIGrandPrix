@@ -234,8 +234,16 @@ def _render_ground_line(
     altitude = -drone_pos_ned[2]  # altitude = -Z_ned
     if altitude < 0.1:
         return
-    # Horizon: ground is below, place a gradient at bottom of image
-    horizon_y = int(IMG_H * (0.5 + pitch / math.radians(90) * 0.5))
+    # Correct horizon accounting for camera tilt:
+    #   horizon appears at FY*tan(tilt + pitch) + CY in image space
+    #   With +20° tilt and pitch=0: y≈296 (bottom 18% is ground, rest is sky)
+    horizon_y = int(FY * math.tan(_CAM_TILT_RAD + pitch) + CY)
     horizon_y = max(0, min(IMG_H - 1, horizon_y))
     if horizon_y < IMG_H:
-        img[horizon_y:, :] = (35, 60, 35)  # dark green = ground
+        # Gradient ground: dark at horizon, slightly lighter at bottom
+        ground_h = IMG_H - horizon_y
+        if ground_h > 0:
+            for row in range(ground_h):
+                frac = row / max(ground_h - 1, 1)
+                green = int(30 + frac * 25)
+                img[horizon_y + row, :] = (20, green, 15)  # dark terrain

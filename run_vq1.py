@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--host", default="localhost", help="DCL simulator host")
     p.add_argument("--mavlink_port", type=int, default=14550)
     p.add_argument("--vision_port", type=int, default=5600)
-    p.add_argument("--max_speed", type=float, default=8.0, help="max flight speed m/s")
+    p.add_argument("--max_speed", type=float, default=10.0, help="max flight speed m/s")
     p.add_argument("--loop_hz", type=float, default=50.0, help="control loop rate Hz")
     p.add_argument("--cnn_model", default=None, help="Path to YOLOv8n .pt weights file")
     p.add_argument("--no_vision", action="store_true", help="Disable vision correction")
@@ -284,15 +284,19 @@ def run(args: argparse.Namespace) -> int:
         remaining_gates = gates[next_gate_idx:]
         if remaining_gates:
             next_gate = remaining_gates[0]
-            dist_to_gate = float(np.linalg.norm(next_gate.position - state.pos_ned))
-            if dist_to_gate < GATE_PASS_RADIUS_M:
+            diff = next_gate.position - state.pos_ned
+            dist_to_gate = float(np.linalg.norm(diff))
+            # Plane-crossing: dot product with normal flips sign when drone crosses gate plane.
+            # Guard dist<5m prevents false trigger from drift at long range.
+            past_gate = (float(np.dot(diff, next_gate.normal)) < 0) and (dist_to_gate < 5.0)
+            if dist_to_gate < GATE_PASS_RADIUS_M or past_gate:
                 logger.info(
                     "Gate %d detected as passed (dist=%.2fm) — advancing",
                     next_gate.gate_id, dist_to_gate,
                 )
                 next_gate_idx += 1
                 waypoints = []  # force replan
-                estimator.reset_position(state.pos_ned)  # anchor drift
+                estimator.reset_position(next_gate.position)
 
         # ── Replan trajectory
         remaining_gates = gates[next_gate_idx:]
@@ -303,7 +307,7 @@ def run(args: argparse.Namespace) -> int:
 
         # ── Select target waypoint
         if waypoints:
-            wp = planner.next_position_target(waypoints, state.pos_ned, lookahead_m=3.0)
+            wp = planner.next_position_target(waypoints, state.pos_ned, lookahead_m=5.0)
         else:
             wp = WaypointNED(
                 pos=state.pos_ned.copy(),

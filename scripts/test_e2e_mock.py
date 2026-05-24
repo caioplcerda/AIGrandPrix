@@ -33,7 +33,7 @@ _VISION_PORT = 15600    # unused by test, server sends here silently
 _N_GATES = 5
 _MAX_DURATION_S = 90.0
 _LOOP_HZ = 50.0
-_MAX_SPEED = 6.0
+_MAX_SPEED = 15.0
 _GATE_PASS_RADIUS_M = 1.5
 _REPLAN_INTERVAL_S = 1.5
 
@@ -106,8 +106,8 @@ def main() -> int:
     estimator = NEDStateEstimator()
     planner = PathPlannerNED(
         max_speed=_MAX_SPEED,
-        approach_distance=2.5,
-        exit_distance=1.5,
+        approach_distance=2.0,
+        exit_distance=1.0,
     )
 
     loop_dt = 1.0 / _LOOP_HZ
@@ -168,7 +168,8 @@ def main() -> int:
             diff = g.position - state.pos_ned
             dist = float(np.linalg.norm(diff))
             # Check drone has crossed gate plane (dot product with normal flips sign)
-            past_gate = float(np.dot(diff, g.normal)) < 0
+            # Guard dist<5m prevents false trigger from IMU drift at long range
+            past_gate = (float(np.dot(diff, g.normal)) < 0) and (dist < 5.0)
             if dist < _GATE_PASS_RADIUS_M or past_gate:
                 logger.info(
                     "Gate %d in range (est dist=%.2fm) — advancing planner",
@@ -186,7 +187,7 @@ def main() -> int:
 
         # Select waypoint target
         if waypoints:
-            wp = planner.next_position_target(waypoints, state.pos_ned, lookahead_m=3.0)
+            wp = planner.next_position_target(waypoints, state.pos_ned, lookahead_m=5.0)
         else:
             wp = WaypointNED(pos=state.pos_ned.copy(), vel=np.zeros(3), yaw=state.yaw, time=elapsed)
 
