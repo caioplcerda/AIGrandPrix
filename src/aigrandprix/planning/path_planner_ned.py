@@ -143,25 +143,32 @@ class PathPlannerNED:
         current_pos: np.ndarray,
         lookahead_m: float = 3.0,
     ) -> WaypointNED | None:
-        """Select the next waypoint to command (lookahead-based).
+        """Select the next waypoint to command (path-distance lookahead).
 
-        Finds the first waypoint ahead of current position by lookahead_m.
-        Returns None when past the last waypoint.
+        Finds nearest waypoint on the path, then advances lookahead_m along
+        the path sequence from there. Cumulative path distance prevents the
+        Euclidean scan from skipping back to exit points when the drone
+        overshoots and is equidistant from approach and exit.
         """
         if not waypoints:
             return None
+
+        # Build cumulative arc-length along the waypoint path
+        cum_dist = [0.0]
+        for i in range(1, len(waypoints)):
+            d = float(np.linalg.norm(waypoints[i].pos - waypoints[i - 1].pos))
+            cum_dist.append(cum_dist[-1] + d)
 
         # Find nearest waypoint index
         dists = [float(np.linalg.norm(wp.pos - current_pos)) for wp in waypoints]
         nearest_idx = int(np.argmin(dists))
 
-        # Look ahead from nearest
+        # Advance lookahead_m along path from nearest
+        target_cum = cum_dist[nearest_idx] + lookahead_m
         for i in range(nearest_idx, len(waypoints)):
-            d = float(np.linalg.norm(waypoints[i].pos - current_pos))
-            if d >= lookahead_m:
+            if cum_dist[i] >= target_cum:
                 return waypoints[i]
 
-        # Past all waypoints — return last
         return waypoints[-1]
 
     # ------------------------------------------------------------------
