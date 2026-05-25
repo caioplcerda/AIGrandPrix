@@ -71,11 +71,15 @@ class TelemetryState:
     gyro_z: float = 0.0
     imu_timestamp_us: int = 0
 
-    # From LOCAL_POSITION_NED (true NED velocity if sim provides it)
+    # From LOCAL_POSITION_NED (true NED position + velocity if sim provides it)
+    pos_ned_x: float = 0.0   # NED x (north) m
+    pos_ned_y: float = 0.0   # NED y (east) m
+    pos_ned_z: float = 0.0   # NED z (down) m
     vel_ned_x: float = 0.0   # NED vx m/s
     vel_ned_y: float = 0.0
     vel_ned_z: float = 0.0
     has_ned_velocity: bool = False
+    has_ned_position: bool = False
 
     # Connection quality
     last_heartbeat_time: float = field(default_factory=time.time)
@@ -191,10 +195,14 @@ class MAVLinkClient:
                 gyro_y=self._telemetry.gyro_y,
                 gyro_z=self._telemetry.gyro_z,
                 imu_timestamp_us=self._telemetry.imu_timestamp_us,
+                pos_ned_x=self._telemetry.pos_ned_x,
+                pos_ned_y=self._telemetry.pos_ned_y,
+                pos_ned_z=self._telemetry.pos_ned_z,
                 vel_ned_x=self._telemetry.vel_ned_x,
                 vel_ned_y=self._telemetry.vel_ned_y,
                 vel_ned_z=self._telemetry.vel_ned_z,
                 has_ned_velocity=self._telemetry.has_ned_velocity,
+                has_ned_position=self._telemetry.has_ned_position,
                 last_heartbeat_time=self._telemetry.last_heartbeat_time,
                 connected=self._telemetry.connected,
             )
@@ -339,10 +347,14 @@ class MAVLinkClient:
 
     def _on_local_position(self, msg: object) -> None:
         with self._lock:
+            self._telemetry.pos_ned_x = float(msg.x)   # type: ignore[attr-defined]
+            self._telemetry.pos_ned_y = float(msg.y)   # type: ignore[attr-defined]
+            self._telemetry.pos_ned_z = float(msg.z)   # type: ignore[attr-defined]
             self._telemetry.vel_ned_x = float(msg.vx)  # type: ignore[attr-defined]
             self._telemetry.vel_ned_y = float(msg.vy)  # type: ignore[attr-defined]
             self._telemetry.vel_ned_z = float(msg.vz)  # type: ignore[attr-defined]
             self._telemetry.has_ned_velocity = True
+            self._telemetry.has_ned_position = True
 
     def _on_timesync(self, msg: object) -> None:
         """Respond to TIMESYNC to maintain clock sync with simulator."""

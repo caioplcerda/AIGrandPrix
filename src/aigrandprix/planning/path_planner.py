@@ -160,7 +160,7 @@ class PathPlanner:
         if total_dist < 0.01:
             return []
 
-        avg_speed = min(self.max_speed * self._trajectory_speed_frac, total_dist / 2.0)
+        avg_speed = self.max_speed * self._trajectory_speed_frac
         total_time = total_dist / max(avg_speed, 0.1)
         time_params = cumulative_dist / total_dist * total_time
 

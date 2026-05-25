@@ -35,7 +35,34 @@ _MAX_DURATION_S = 90.0
 _LOOP_HZ = 50.0
 _MAX_SPEED = 15.0
 _GATE_PASS_RADIUS_M = 1.5
-_REPLAN_INTERVAL_S = 1.5
+_REPLAN_INTERVAL_S = 0.25
+_INNER_HALF = 0.75  # gate inner opening half-width (1.5m / 2)
+
+
+def _gate_crossed(
+    gate_pos: np.ndarray,
+    gate_normal: np.ndarray,
+    old_pos: np.ndarray,
+    new_pos: np.ndarray,
+    inner_half: float = _INNER_HALF,
+) -> bool:
+    """Server-exact gate pass check: plane crossing + inner opening bounds."""
+    n = gate_normal
+    c = gate_pos
+    d_old = float(np.dot(old_pos - c, n))
+    d_new = float(np.dot(new_pos - c, n))
+    if d_old * d_new > 0 or abs(d_old - d_new) < 1e-9:
+        return False
+    t = d_old / (d_old - d_new)
+    cross = old_pos + t * (new_pos - old_pos)
+    diff = cross - c
+    up_ned = np.array([0.0, 0.0, -1.0])
+    right_ned = np.cross(n, up_ned)
+    rn = float(np.linalg.norm(right_ned))
+    right_ned = right_ned / rn if rn > 1e-6 else np.array([0.0, 1.0, 0.0])
+    lat = abs(float(np.dot(diff, right_ned)))
+    vert = abs(float(np.dot(diff, up_ned)))
+    return lat <= inner_half and vert <= inner_half
 
 
 def run_server(gates, result_out: dict, stop_event: threading.Event) -> None:
@@ -106,7 +133,7 @@ def main() -> int:
     estimator = NEDStateEstimator()
     planner = PathPlannerNED(
         max_speed=_MAX_SPEED,
-        approach_distance=2.0,
+        approach_distance=6.0,
         exit_distance=1.0,
     )
 
@@ -116,6 +143,7 @@ def main() -> int:
     last_replan = -_REPLAN_INTERVAL_S  # force immediate plan
     wp = WaypointNED(pos=np.zeros(3), vel=np.zeros(3), yaw=0.0, time=0.0)
     t_start = time.time()
+    prev_pos: np.ndarray | None = None
 
     while True:
         t_loop = time.perf_counter()
@@ -159,30 +187,22 @@ def main() -> int:
             continue
 
         state = estimator.update(telem)
+        curr_pos = state.pos_ned
 
-        # Gate pass check (client-side by estimated distance)
-        # Use gate center position: advance only if approaching AND within radius
-        remaining = gate_neds[next_gate_idx:]
-        if remaining:
-            g = remaining[0]
-            diff = g.position - state.pos_ned
-            dist = float(np.linalg.norm(diff))
-            # Check drone has crossed gate plane (dot product with normal flips sign)
-            # Guard dist<5m prevents false trigger from IMU drift at long range
-            past_gate = (float(np.dot(diff, g.normal)) < 0) and (dist < 5.0)
-            if dist < _GATE_PASS_RADIUS_M or past_gate:
-                logger.info(
-                    "Gate %d in range (est dist=%.2fm) — advancing planner",
-                    g.gate_id, dist,
-                )
+        # Server-exact gate pass: plane crossing within inner opening
+        if prev_pos is not None and next_gate_idx < _N_GATES:
+            g = gate_neds[next_gate_idx]
+            if _gate_crossed(g.position, g.normal, prev_pos, curr_pos):
+                logger.info("Gate %d crossed — advancing planner", g.gate_id)
                 next_gate_idx += 1
                 waypoints = []
-                estimator.reset_position(g.position)
 
-        # Replan
+        prev_pos = curr_pos.copy()
+
+        # Replan — single-gate planning prevents corner-cutting on lateral offsets
         remaining = gate_neds[next_gate_idx:]
         if remaining and (not waypoints or elapsed - last_replan > _REPLAN_INTERVAL_S):
-            waypoints = planner.plan(remaining, state.pos_ned, state.vel_ned)
+            waypoints = planner.plan(remaining[:1], state.pos_ned, np.zeros(3))
             last_replan = elapsed
 
         # Select waypoint target

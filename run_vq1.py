@@ -73,6 +73,32 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _gate_crossed(
+    gate_pos: np.ndarray,
+    gate_normal: np.ndarray,
+    old_pos: np.ndarray,
+    new_pos: np.ndarray,
+    inner_half: float = 0.75,
+) -> bool:
+    """Server-exact gate pass check: plane crossing + inner opening bounds."""
+    n = gate_normal
+    c = gate_pos
+    d_old = float(np.dot(old_pos - c, n))
+    d_new = float(np.dot(new_pos - c, n))
+    if d_old * d_new > 0 or abs(d_old - d_new) < 1e-9:
+        return False
+    t = d_old / (d_old - d_new)
+    cross = old_pos + t * (new_pos - old_pos)
+    diff = cross - c
+    up_ned = np.array([0.0, 0.0, -1.0])
+    right_ned = np.cross(n, up_ned)
+    rn = float(np.linalg.norm(right_ned))
+    right_ned = right_ned / rn if rn > 1e-6 else np.array([0.0, 1.0, 0.0])
+    lat = abs(float(np.dot(diff, right_ned)))
+    vert = abs(float(np.dot(diff, up_ned)))
+    return lat <= inner_half and vert <= inner_half
+
+
 def _pixel_to_bearing(cx_px: float, cy_px: float) -> tuple[float, float]:
     """Convert pixel coords to (yaw_offset_rad, pitch_offset_rad) from camera boresight.
 
@@ -166,7 +192,7 @@ def run(args: argparse.Namespace) -> int:
     estimator = NEDStateEstimator()
 
     # ── Path planner (NED)
-    planner = PathPlannerNED(max_speed=args.max_speed)
+    planner = PathPlannerNED(max_speed=args.max_speed, approach_distance=6.0, exit_distance=1.0)
 
     # ── Parse gates from args (or empty list)
     gates: list[GateNED] = []
@@ -204,8 +230,9 @@ def run(args: argparse.Namespace) -> int:
     waypoints: list[WaypointNED] = []
     last_replan = 0.0
     last_vision_frame_id = -1
-    REPLAN_INTERVAL_S = 2.0
-    GATE_PASS_RADIUS_M = 1.5
+    REPLAN_INTERVAL_S = 0.25
+    INNER_HALF = 0.75  # gate inner opening half-width
+    prev_pos: np.ndarray | None = None
 
     running = True
 
@@ -240,6 +267,17 @@ def run(args: argparse.Namespace) -> int:
             continue
 
         state = estimator.update(telem)
+        curr_pos = state.pos_ned
+
+        # ── Gate pass check (server-exact: plane crossing within inner opening)
+        if prev_pos is not None and next_gate_idx < len(gates):
+            next_gate = gates[next_gate_idx]
+            if _gate_crossed(next_gate.position, next_gate.normal, prev_pos, curr_pos, INNER_HALF):
+                logger.info("Gate %d crossed — advancing", next_gate.gate_id)
+                next_gate_idx += 1
+                waypoints = []
+
+        prev_pos = curr_pos.copy()
 
         # ── Vision: gate position correction (CNN only — HSV too noisy)
         if use_vision_correction and detector is not None and next_gate_idx < len(gates):
@@ -280,28 +318,10 @@ def run(args: argparse.Namespace) -> int:
                 except Exception as exc:
                     logger.debug("Vision detection error: %s", exc)
 
-        # ── Gate pass check
-        remaining_gates = gates[next_gate_idx:]
-        if remaining_gates:
-            next_gate = remaining_gates[0]
-            diff = next_gate.position - state.pos_ned
-            dist_to_gate = float(np.linalg.norm(diff))
-            # Plane-crossing: dot product with normal flips sign when drone crosses gate plane.
-            # Guard dist<5m prevents false trigger from drift at long range.
-            past_gate = (float(np.dot(diff, next_gate.normal)) < 0) and (dist_to_gate < 5.0)
-            if dist_to_gate < GATE_PASS_RADIUS_M or past_gate:
-                logger.info(
-                    "Gate %d detected as passed (dist=%.2fm) — advancing",
-                    next_gate.gate_id, dist_to_gate,
-                )
-                next_gate_idx += 1
-                waypoints = []  # force replan
-                estimator.reset_position(next_gate.position)
-
-        # ── Replan trajectory
+        # ── Replan trajectory — single-gate prevents corner-cutting on lateral offsets
         remaining_gates = gates[next_gate_idx:]
         if remaining_gates and (not waypoints or elapsed - last_replan > REPLAN_INTERVAL_S):
-            waypoints = planner.plan(remaining_gates, state.pos_ned, state.vel_ned)
+            waypoints = planner.plan(remaining_gates[:1], state.pos_ned, np.zeros(3))
             last_replan = elapsed
             logger.debug("Replanned: %d waypoints for %d gates", len(waypoints), len(remaining_gates))
 

@@ -143,24 +143,20 @@ class NEDStateEstimator:
         # Rotation matrix body → NED
         R = _rpy_to_rotation_matrix(self._roll, self._pitch, self._yaw)
 
-        # Specific force in body frame (accelerometer reading, includes gravity reaction)
-        # In body NED (X fwd, Y right, Z down): when level+hover, zacc ≈ -9.81
-        # because accelerometer measures -g in body (reaction to gravity)
-        # Specific force = a_body - g_body. So a_body = specific_force + g_body
-        # g_body = R.T @ g_ned
-        if telem.has_ned_velocity:
-            # Sim provides true NED velocity (LOCAL_POSITION_NED) — use directly, no drift.
+        if telem.has_ned_position:
+            # Sim provides true NED position (LOCAL_POSITION_NED) — use directly, no drift.
+            self._pos = np.array([telem.pos_ned_x, telem.pos_ned_y, telem.pos_ned_z])
             self._vel = np.array([telem.vel_ned_x, telem.vel_ned_y, telem.vel_ned_z])
+        elif telem.has_ned_velocity:
+            # Position not available; use true velocity for integration.
+            self._vel = np.array([telem.vel_ned_x, telem.vel_ned_y, telem.vel_ned_z])
+            self._pos = self._pos + self._vel * dt
         else:
             # Fallback: integrate from IMU specific force.
-            # specific_force (accel_body) = kinematic_accel_body - gravity_body
-            # world_accel = R @ specific_force + g_ned = true kinematic accel in NED.
             accel_body = np.array([telem.accel_x, telem.accel_y, telem.accel_z])
             world_accel = R @ accel_body + _GRAVITY_NED
             self._vel = self._vel * self._vel_decay + world_accel * dt
-
-        # Integrate position from velocity
-        self._pos = self._pos + self._vel * dt
+            self._pos = self._pos + self._vel * dt
 
         return self._make_state()
 
