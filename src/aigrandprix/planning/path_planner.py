@@ -169,7 +169,7 @@ class PathPlanner:
             cs = CubicSpline(
                 time_params,
                 waypoints[:, axis],
-                bc_type=((1, start_vel[axis]), (1, 0.0)),
+                bc_type=((1, start_vel[axis]), (2, 0.0)),
             )
             splines.append(cs)
 
