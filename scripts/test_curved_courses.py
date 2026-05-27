@@ -171,6 +171,7 @@ def run_course(
         if prev_pos is not None and next_gate_idx < n_gates:
             g = gate_neds[next_gate_idx]
             if _gate_crossed(g.position, g.normal, prev_pos, curr_pos):
+                estimator.reset_position(g.position)
                 next_gate_idx += 1
                 waypoints = []
 
@@ -178,8 +179,6 @@ def run_course(
 
         remaining = gate_neds[next_gate_idx:]
         if remaining and (not waypoints or elapsed - last_replan > _REPLAN_INTERVAL_S):
-            # Use zero start velocity so the plan doesn't inherit lateral momentum
-            # from diagonal gate exits, which causes overshoot on the next gate.
             waypoints = planner.plan(remaining[:1], state.pos_ned, np.zeros(3))
             last_replan = elapsed
 

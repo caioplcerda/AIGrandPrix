@@ -274,6 +274,7 @@ def run(args: argparse.Namespace) -> int:
             next_gate = gates[next_gate_idx]
             if _gate_crossed(next_gate.position, next_gate.normal, prev_pos, curr_pos, INNER_HALF):
                 logger.info("Gate %d crossed — advancing", next_gate.gate_id)
+                estimator.reset_position(next_gate.position)
                 next_gate_idx += 1
                 waypoints = []
 

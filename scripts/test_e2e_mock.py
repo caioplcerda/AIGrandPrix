@@ -194,6 +194,7 @@ def main() -> int:
             g = gate_neds[next_gate_idx]
             if _gate_crossed(g.position, g.normal, prev_pos, curr_pos):
                 logger.info("Gate %d crossed — advancing planner", g.gate_id)
+                estimator.reset_position(g.position)
                 next_gate_idx += 1
                 waypoints = []
 
