@@ -203,7 +203,7 @@ def main() -> int:
         # Replan — single-gate planning prevents corner-cutting on lateral offsets
         remaining = gate_neds[next_gate_idx:]
         if remaining and (not waypoints or elapsed - last_replan > _REPLAN_INTERVAL_S):
-            waypoints = planner.plan(remaining[:1], state.pos_ned, np.zeros(3))
+            waypoints = planner.plan(remaining[:1], state.pos_ned, state.vel_ned)
             last_replan = elapsed
 
         # Select waypoint target

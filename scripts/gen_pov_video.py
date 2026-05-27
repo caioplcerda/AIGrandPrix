@@ -173,7 +173,7 @@ def run_sim_and_capture() -> list[Frame]:
 
         remaining = gate_neds[next_idx:]
         if remaining and (not waypoints or elapsed - last_replan > 0.25):
-            waypoints = planner.plan(remaining[:1], state.pos_ned, np.zeros(3))
+            waypoints = planner.plan(remaining[:1], state.pos_ned, state.vel_ned)
             last_replan = elapsed
 
         if waypoints:

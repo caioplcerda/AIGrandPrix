@@ -56,10 +56,10 @@ class ControlCommand:
 
 
 _DT = 1.0 / 120.0           # 120 Hz physics
-_DRAG = 0.15                 # aerodynamic drag coefficient
-_MAX_SPEED = 20.0            # m/s
-_MAX_ACCEL = 15.0            # m/s²
-_ATTITUDE_RATE_MAX = 3.0     # rad/s max attitude rate
+_DRAG = 0.10                 # aerodynamic drag coefficient
+_MAX_SPEED = 30.0            # m/s
+_MAX_ACCEL = 25.0            # m/s²
+_ATTITUDE_RATE_MAX = 4.0     # rad/s max attitude rate
 _G = 9.81
 
 
@@ -76,8 +76,8 @@ class Physics6DOF:
         self,
         initial_pos: np.ndarray | None = None,
         initial_yaw: float = 0.0,
-        kp_pos: float = 2.0,
-        kd_pos: float = 1.5,
+        kp_pos: float = 3.5,
+        kd_pos: float = 2.0,
         kp_att: float = 8.0,
     ) -> None:
         pos = initial_pos.copy() if initial_pos is not None else np.array([0.0, 0.0, -2.0])

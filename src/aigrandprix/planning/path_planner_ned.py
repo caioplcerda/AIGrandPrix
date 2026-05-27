@@ -175,12 +175,23 @@ class PathPlannerNED:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _approach_dist_for(self, gate: GateNED) -> float:
+        """Gate-normal-only approach distance — stable across replans.
+
+        lateral = sqrt(normal_east² + normal_down²)
+          0.0 (pure forward/backward): 0.67 × approach_dist
+          1.0 (pure lateral):           approach_dist
+        """
+        lateral = float(np.sqrt(gate.normal[1] ** 2 + gate.normal[2] ** 2))
+        return self._approach_dist * (0.67 + 0.33 * lateral)
+
     def _build_waypoints_ned(
         self, gates: list[GateNED], start_pos: np.ndarray
     ) -> np.ndarray:
         pts = [_clamp_altitude(start_pos)]
         for g in gates:
-            approach = _clamp_altitude(g.position - g.normal * self._approach_dist)
+            adist = self._approach_dist_for(g)
+            approach = _clamp_altitude(g.position - g.normal * adist)
             pts.append(approach)
             pts.append(_clamp_altitude(g.position.copy()))
             exit_pt = _clamp_altitude(g.position + g.normal * self._exit_dist)

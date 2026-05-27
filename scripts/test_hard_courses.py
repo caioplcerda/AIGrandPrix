@@ -33,7 +33,7 @@ logger = logging.getLogger("hard_test")
 
 _MAX_DURATION_S = 120.0
 _LOOP_HZ = 50.0
-_MAX_SPEED = 15.0
+_MAX_SPEED = 25.0
 _REPLAN_INTERVAL_S = 0.25
 _INNER_HALF = 0.75
 
@@ -174,7 +174,7 @@ def run_course(
 
         remaining = gate_neds[next_gate_idx:]
         if remaining and (not waypoints or elapsed - last_replan > _REPLAN_INTERVAL_S):
-            waypoints = planner.plan(remaining[:1], state.pos_ned, np.zeros(3))
+            waypoints = planner.plan(remaining[:1], state.pos_ned, state.vel_ned)
             last_replan = elapsed
 
         if waypoints:

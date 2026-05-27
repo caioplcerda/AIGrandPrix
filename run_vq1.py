@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--host", default="localhost", help="DCL simulator host")
     p.add_argument("--mavlink_port", type=int, default=14550)
     p.add_argument("--vision_port", type=int, default=5600)
-    p.add_argument("--max_speed", type=float, default=10.0, help="max flight speed m/s")
+    p.add_argument("--max_speed", type=float, default=25.0, help="max flight speed m/s")
     p.add_argument("--loop_hz", type=float, default=50.0, help="control loop rate Hz")
     p.add_argument("--cnn_model", default=None, help="Path to YOLOv8n .pt weights file")
     p.add_argument("--no_vision", action="store_true", help="Disable vision correction")
@@ -322,7 +322,7 @@ def run(args: argparse.Namespace) -> int:
         # ── Replan trajectory — single-gate prevents corner-cutting on lateral offsets
         remaining_gates = gates[next_gate_idx:]
         if remaining_gates and (not waypoints or elapsed - last_replan > REPLAN_INTERVAL_S):
-            waypoints = planner.plan(remaining_gates[:1], state.pos_ned, np.zeros(3))
+            waypoints = planner.plan(remaining_gates[:1], state.pos_ned, state.vel_ned)
             last_replan = elapsed
             logger.debug("Replanned: %d waypoints for %d gates", len(waypoints), len(remaining_gates))
 
