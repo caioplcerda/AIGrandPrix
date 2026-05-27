@@ -257,9 +257,22 @@ def run_course(name, gate_defs, mp, vp):
             wps = pl.plan(rem[:1], st.pos_ned, st.vel_ned); lrp = el
         wp = pl.next_position_target(wps, st.pos_ned, lookahead_m=5.) if wps else None
         if wp is None: wp = WaypointNED(pos=st.pos_ned.copy(), vel=np.zeros(3), yaw=st.yaw, time=el)
+        _ADIST = 6.0
+        if rem:
+            apt = rem[0].position - rem[0].normal * _ADIST
+            av = apt - st.pos_ned
+            da = float(np.linalg.norm(av))
+            ah = float(np.dot(av, rem[0].normal)) > 0.0
+            if da > 0.1 and ah:
+                bl = min(1.0, max(0.0, (da - 4.0) / 8.0))
+                cv = bl * (av / da * _MAX_SPEED) + (1.0 - bl) * wp.vel
+            else:
+                cv = wp.vel
+        else:
+            cv = wp.vel
         client.send_position_target(PositionTargetNED(
             x=float(wp.pos[0]), y=float(wp.pos[1]), z=float(wp.pos[2]),
-            vx=float(wp.vel[0]), vy=float(wp.vel[1]), vz=float(wp.vel[2]), yaw=float(wp.yaw)))
+            vx=float(cv[0]), vy=float(cv[1]), vz=float(cv[2]), yaw=float(wp.yaw)))
         if (s := dt - (time.perf_counter() - tl)) > 0: time.sleep(s)
 
     client.stop()
