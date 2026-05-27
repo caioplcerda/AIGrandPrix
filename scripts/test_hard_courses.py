@@ -223,7 +223,7 @@ def _norm(v: list[float]) -> np.ndarray:
 HARD_COURSES = [
     # S-curve with aggressive altitude swings (+2.5m per gate) — no diagonal normals
     (
-        "chicane_3d",
+        "chicane_3d",  # baseline 3D
         [
             (np.array([12.0,  4.0, -1.5]), np.array([1.0, 0.0, 0.0])),
             (np.array([24.0, -4.0, -4.0]), np.array([1.0, 0.0, 0.0])),
@@ -275,6 +275,31 @@ HARD_COURSES = [
             (np.array([12.0,  4.0, -2.5]), _norm([1.0, 0.0, 0.0])),
         ],
         14574, 15714,
+    ),
+    # Tight spacing: 8m between gates, steep altitude swings, forward normals
+    (
+        "tight_gates_8m",
+        [
+            (np.array([ 8.0,  0.0, -2.0]), np.array([1.0, 0.0, 0.0])),
+            (np.array([16.0,  3.0, -4.0]), np.array([1.0, 0.0, 0.0])),
+            (np.array([24.0, -3.0, -1.5]), np.array([1.0, 0.0, 0.0])),
+            (np.array([32.0,  3.0, -4.0]), np.array([1.0, 0.0, 0.0])),
+            (np.array([40.0,  0.0, -2.5]), np.array([1.0, 0.0, 0.0])),
+        ],
+        14575, 15715,
+    ),
+    # Extreme: 3D spiral + diagonal normals, tight 8m spacing
+    (
+        "extreme_3d_tight",
+        [
+            (np.array([ 8.0,  0.0, -2.0]), _norm([1.0, 0.0, 0.0])),
+            (np.array([14.0,  6.0, -3.5]), _norm([0.707, 0.707, 0.0])),
+            (np.array([ 8.0, 12.0, -5.0]), _norm([-0.707, 0.707, 0.0])),
+            (np.array([ 2.0,  8.0, -6.0]), _norm([-1.0, 0.0, 0.0])),
+            (np.array([ 6.0,  2.0, -7.0]), _norm([0.707, -0.707, 0.0])),
+            (np.array([14.0,  0.0, -5.5]), _norm([1.0, 0.0, 0.0])),
+        ],
+        14576, 15716,
     ),
 ]
 
