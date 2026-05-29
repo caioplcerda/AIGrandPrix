@@ -57,8 +57,8 @@ class ControlCommand:
 
 _DT = 1.0 / 120.0           # 120 Hz physics
 _DRAG = 0.10                 # aerodynamic drag coefficient
-_MAX_SPEED = 30.0            # m/s
-_MAX_ACCEL = 25.0            # m/s²
+_MAX_SPEED = 38.0            # m/s — raised from 30 to allow 35 m/s omega battery
+_MAX_ACCEL = 35.0            # m/s² — raised from 25 for proper deceleration at 35 m/s
 _ATTITUDE_RATE_MAX = 4.0     # rad/s max attitude rate
 _G = 9.81
 
