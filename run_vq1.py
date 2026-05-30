@@ -326,13 +326,13 @@ def run(args: argparse.Namespace) -> int:
             last_replan = elapsed
             logger.debug("Replanned: %d waypoints for %d gates", len(waypoints), len(remaining_gates))
 
-        # ── Select target waypoint (speed-adaptive lookahead: pure-pursuit best practice —
-        # grows with speed to build velocity on straights, shrinks to 5m floor on turns
-        # where the drone slows, keeping it tight. Caps at 18m to avoid corner-cutting.)
+        # ── Select target waypoint. Fixed 5m lookahead: speed-adaptive lookahead was
+        # tested and CORNER-CUTS on weave/lateral gates (targets a point past the lateral
+        # offset → drone flies straight → misses gate). Gate completion is the primary
+        # goal, so reliability wins over the straight-line speed gain. Verified on the
+        # 60-gate multi-pattern gauntlet (60/60 at 5m; 1/60 with adaptive lookahead).
         if waypoints:
-            speed_now = float(np.linalg.norm(state.vel_ned))
-            lookahead = min(18.0, max(5.0, speed_now * 0.45))
-            wp = planner.next_position_target(waypoints, state.pos_ned, lookahead_m=lookahead)
+            wp = planner.next_position_target(waypoints, state.pos_ned, lookahead_m=5.0)
         else:
             wp = WaypointNED(
                 pos=state.pos_ned.copy(),

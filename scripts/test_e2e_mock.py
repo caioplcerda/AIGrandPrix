@@ -206,11 +206,9 @@ def main() -> int:
             waypoints = planner.plan(remaining[:1], state.pos_ned, state.vel_ned)
             last_replan = elapsed
 
-        # Select waypoint target (speed-adaptive lookahead — matches run_vq1.py)
+        # Select waypoint target — fixed 5m (adaptive corner-cuts on weaves; matches run_vq1)
         if waypoints:
-            speed_now = float(np.linalg.norm(state.vel_ned))
-            lookahead = min(18.0, max(5.0, speed_now * 0.45))
-            wp = planner.next_position_target(waypoints, state.pos_ned, lookahead_m=lookahead)
+            wp = planner.next_position_target(waypoints, state.pos_ned, lookahead_m=5.0)
         else:
             wp = WaypointNED(pos=state.pos_ned.copy(), vel=np.zeros(3), yaw=state.yaw, time=elapsed)
 
