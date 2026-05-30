@@ -449,17 +449,26 @@ the `max_speed` param only shaped trajectory planning, never achieved speed.
 - `kd_pos` 2.0 → 8.0 — drag had provided implicit velocity damping; the low-drag
   regime needs explicit kd or the drone overshoots gates at speed
 
-**Impact:** VQ1 e2e 5/5 dropped **9.8s → 5.77s** (drag fix) **→ 3.68s** (speed-adaptive
-lookahead) = **62% faster total**. Drone now genuinely reaches 48 m/s (zenith battery,
-8g physics). 243 unit tests still pass.
+**Impact:** VQ1 e2e 5/5 dropped **9.8s → 3.72s (62% faster)** — almost entirely from
+`max_speed 15→30` (now achievable post-drag-fix), NOT from lookahead. Drone genuinely
+reaches 48 m/s (zenith battery, 8g physics). 243 unit tests still pass.
 
-### Speed-Adaptive Lookahead (run_vq1.py)
+### Lookahead: fixed 5m (adaptive REVERTED — corner-cuts on weaves)
 
-Pure-pursuit lookahead now scales with speed: `clamp(speed*0.45, 5, 18)`. Grows on
-straights to build velocity, shrinks to 5m floor on turns (where the approach blend
-slows the drone). Physics-agnostic — transfers to the real DCL sim. This + the drag
-fix took the e2e from 9.8s to 3.68s. Speed ladder validated 25→30→33→38→42→48 m/s,
-all batteries 8/8. Orbital (helix) courses remain turn-limited (~105s, geometry-bound).
+Speed-adaptive lookahead `clamp(speed*0.45, 5, 18)` was tried and reverted. It
+corner-cuts on weave/lateral gates — targets a point past the lateral offset, so the
+drone flies straight and misses the gate. The straight e2e didn't expose it; the
+60-gate gauntlet did (1/60 adaptive vs 60/60 fixed-5). **Gate completion is the
+primary goal → fixed 5m lookahead.** The e2e is the same speed either way (3.72 vs
+3.68s) because the gain was max_speed, not lookahead.
+
+### Speed ladder + gauntlet
+
+Validated 25→30→33→38→42→48 m/s, all single-pattern batteries 8/8 (fixed-5 lookahead).
+**Gauntlet** (60 gates, all patterns chained slalom→altitude→chaos→helix→hypersonic):
+60/60 at 38 m/s. KEY: transitioning from a max-speed straight INTO a turn fails (can't
+weave at 38 m/s) — turning patterns must precede the sprint. Orbital (helix) courses
+turn-limited (~105s, geometry-bound, not speed-bound).
 
 ### Course Design Rules (learned the hard way)
 
