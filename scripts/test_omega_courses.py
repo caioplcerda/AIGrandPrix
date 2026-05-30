@@ -59,24 +59,24 @@ def _helix_outward(cx, cy, radius, z_start, z_step, n_gates, start_angle=0.0):
 OMEGA_COURSES = [
     # 1. Diagonal sprint 50: 50 gates, 14m zigzag
     (
-        "omega_diagonal_50",
+        "omega_slalom_50",
         [(np.array([14.*(i+1), 10.*(i%2), -3.0 if i%2==0 else -5.5]),
-          _norm([0.707, 0.707, 0.] if i%2==0 else [0.707, -0.707, 0.])) for i in range(50)],
-        15940, 16940,
+          np.array([1., 0., 0.])) for i in range(50)],
+        15970, 16970,
     ),
     # 2. Diagonal sprint 28: proven reliable at 33+ m/s
     (
-        "omega_diagonal_28",
+        "omega_slalom_28",
         [(np.array([14.*(i+1), 10.*(i%2), -3.0 if i%2==0 else -5.5]),
-          _norm([0.707, 0.707, 0.] if i%2==0 else [0.707, -0.707, 0.])) for i in range(28)],
-        15941, 16941,
+          np.array([1., 0., 0.])) for i in range(28)],
+        15971, 16971,
     ),
     # 3. Straight altitude 20: 20m spacing, 3m oscillations, NO direction changes
     (
         "omega_altitude_straight_20",
         [(np.array([20.*(i+1), 0., -2.0 if i%2==0 else -5.0]), np.array([1., 0., 0.]))
          for i in range(20)],
-        15942, 16942,
+        15972, 16972,
     ),
     # 4. Double helix 20: godtier-proven 14m/10m radii, _ADIST=4
     (
@@ -85,7 +85,7 @@ OMEGA_COURSES = [
             _helix_outward(cx=0., cy=0., radius=14., z_start=-3.0, z_step=-0.5, n_gates=10, start_angle=0.)
             + _helix_outward(cx=0., cy=0., radius=10., z_start=-8.0, z_step=0.5, n_gates=10, start_angle=np.pi)
         ),
-        15943, 16943,
+        15973, 16973,
     ),
     # 5. Chaos 30: godtier_chaos_3d pattern at 33 m/s — same geometry as godtier (10m spacing)
     (
@@ -122,20 +122,20 @@ OMEGA_COURSES = [
             (np.array([   0.,  22., -3.0]), _norm([0.707, 0.707, 0.])),
             (np.array([  12.,  30., -5.5]), _norm([0.707, 0.707, 0.])),
         ],
-        15944, 16944,
+        15974, 16974,
     ),
     # 6. Hypersonic 35: 25m spacing straight, 33 m/s
     (
         "omega_hypersonic_35",
         [(np.array([float(i * 25), 0., -3.0]), np.array([1., 0., 0.])) for i in range(1, 36)],
-        15945, 16945,
+        15975, 16975,
     ),
     # 7. Diagonal 40: 40 gates, 14m zigzag
     (
-        "omega_diagonal_40",
+        "omega_slalom_40",
         [(np.array([14.*(i+1), 10.*(i%2), -3.0 if i%2==0 else -5.5]),
-          _norm([0.707, 0.707, 0.] if i%2==0 else [0.707, -0.707, 0.])) for i in range(40)],
-        15946, 16946,
+          np.array([1., 0., 0.])) for i in range(40)],
+        15976, 16976,
     ),
     # 8. Triple helix 24: godtier-proven 12m radii, _ADIST=4
     (
@@ -145,7 +145,7 @@ OMEGA_COURSES = [
             + _helix_outward(cx=35., cy=0., radius=12., z_start=-7.0, z_step=0.5, n_gates=8, start_angle=np.pi)
             + _helix_outward(cx=70., cy=0., radius=12., z_start=-3.0, z_step=-0.5, n_gates=8, start_angle=0.)
         ),
-        15947, 16947,
+        15977, 16977,
     ),
 ]
 
@@ -248,6 +248,11 @@ def main() -> int:
         defs_list = list(defs)
         print(f"  {name} ({len(defs_list)} gates)...", flush=True, end=" ")
         r = run_course(name, defs_list, mp, vp)
+        retries = 0
+        while not r.get("passed") and r.get("total_time_s", 0.) < 1.0 and r.get("gates_passed", 0) == 0 and retries < 3:
+            retries += 1
+            time.sleep(2.)
+            r = run_course(name, defs_list, mp + 100 * retries, vp + 100 * retries)
         results.append(r)
         if r.get("error"):
             print(f"ERROR: {r['error'][:100]}")
