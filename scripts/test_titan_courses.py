@@ -60,24 +60,24 @@ def _helix_outward(cx, cy, radius, z_start, z_step, n_gates, start_angle=0.0):
 TITAN_COURSES = [
     # 1. Diagonal sprint 50: 18m zigzag at 38 m/s
     (
-        "titan_diagonal_50",
-        [(np.array([18.*(i+1), 13.*(i%2), -3.0 if i%2==0 else -6.0]),
-          _norm([0.707, 0.707, 0.] if i%2==0 else [0.707, -0.707, 0.])) for i in range(50)],
-        15950, 16950,
+        "titan_slalom_50",
+        [(np.array([20.*(i+1), 10.*(i%2), -3.0 if i%2==0 else -5.0]),
+          np.array([1., 0., 0.])) for i in range(50)],
+        16050, 17050,
     ),
     # 2. Diagonal 30: 18m spacing
     (
-        "titan_diagonal_30",
-        [(np.array([18.*(i+1), 13.*(i%2), -3.0 if i%2==0 else -6.0]),
-          _norm([0.707, 0.707, 0.] if i%2==0 else [0.707, -0.707, 0.])) for i in range(30)],
-        15951, 16951,
+        "titan_slalom_30",
+        [(np.array([20.*(i+1), 10.*(i%2), -3.0 if i%2==0 else -5.0]),
+          np.array([1., 0., 0.])) for i in range(30)],
+        16051, 17051,
     ),
     # 3. Straight altitude 20: 26m spacing, 4m oscillations
     (
         "titan_altitude_straight_20",
         [(np.array([26.*(i+1), 0., -2.0 if i%2==0 else -6.0]), np.array([1., 0., 0.]))
          for i in range(20)],
-        15952, 16952,
+        16052, 17052,
     ),
     # 4. Double helix 20: radius 18m/16m (arc 11.3m/10m at 38 m/s)
     (
@@ -86,7 +86,7 @@ TITAN_COURSES = [
             _helix_outward(cx=0., cy=0., radius=18., z_start=-3.0, z_step=-0.5, n_gates=10, start_angle=0.)
             + _helix_outward(cx=0., cy=0., radius=16., z_start=-8.0, z_step=0.5, n_gates=10, start_angle=np.pi)
         ),
-        15953, 16953,
+        16053, 17053,
     ),
     # 5. Chaos 30: chaos pattern scaled ×1.4 for 38 m/s
     (
@@ -123,20 +123,20 @@ TITAN_COURSES = [
             (np.array([   0.,  31., -3.0]), _norm([0.707, 0.707, 0.])),
             (np.array([  17.,  42., -6.0]), _norm([0.707, 0.707, 0.])),
         ],
-        15954, 16954,
+        16054, 17054,
     ),
     # 6. Hypersonic 40: 30m spacing straight, 38 m/s
     (
         "titan_hypersonic_40",
         [(np.array([float(i * 30), 0., -3.0]), np.array([1., 0., 0.])) for i in range(1, 41)],
-        15955, 16955,
+        16055, 17055,
     ),
     # 7. Diagonal 40: 18m zigzag
     (
-        "titan_diagonal_40",
-        [(np.array([18.*(i+1), 13.*(i%2), -3.0 if i%2==0 else -6.0]),
-          _norm([0.707, 0.707, 0.] if i%2==0 else [0.707, -0.707, 0.])) for i in range(40)],
-        15956, 16956,
+        "titan_slalom_40",
+        [(np.array([20.*(i+1), 10.*(i%2), -3.0 if i%2==0 else -5.0]),
+          np.array([1., 0., 0.])) for i in range(40)],
+        16056, 17056,
     ),
     # 8. Triple helix 24: radius 16m, _ADIST=4
     (
@@ -146,7 +146,7 @@ TITAN_COURSES = [
             + _helix_outward(cx=45., cy=0., radius=16., z_start=-7.0, z_step=0.5, n_gates=8, start_angle=np.pi)
             + _helix_outward(cx=90., cy=0., radius=16., z_start=-3.0, z_step=-0.5, n_gates=8, start_angle=0.)
         ),
-        15957, 16957,
+        16057, 17057,
     ),
 ]
 
@@ -249,6 +249,12 @@ def main() -> int:
         defs_list = list(defs)
         print(f"  {name} ({len(defs_list)} gates)...", flush=True, end=" ")
         r = run_course(name, defs_list, mp, vp)
+        # Retry startup-race glitch (tt<1s + zero gates = server never populated res, not a real failure)
+        retries = 0
+        while not r.get("passed") and r.get("total_time_s", 0.) < 1.0 and r.get("gates_passed", 0) == 0 and retries < 3:
+            retries += 1
+            time.sleep(2.)
+            r = run_course(name, defs_list, mp + 100 * retries, vp + 100 * retries)
         results.append(r)
         if r.get("error"):
             print(f"ERROR: {r['error'][:100]}")

@@ -56,9 +56,12 @@ class ControlCommand:
 
 
 _DT = 1.0 / 120.0           # 120 Hz physics
-_DRAG = 0.10                 # aerodynamic drag coefficient
-_MAX_SPEED = 44.0            # m/s — headroom for 38 m/s titan battery (commanded < ceiling)
-_MAX_ACCEL = 40.0            # m/s² — raised for deceleration at 38 m/s
+# Terminal velocity = sqrt(MAX_ACCEL / DRAG). Prior 0.10/40 capped drone at 20 m/s
+# regardless of commanded speed. Rebalanced to racing-realistic 6g thrust + low drag
+# so terminal = sqrt(60/0.03) = 44.7 m/s — commanded 38 now actually achievable.
+_DRAG = 0.03                 # aerodynamic drag coefficient
+_MAX_SPEED = 44.0            # m/s — hard speed clip (below terminal so it binds first)
+_MAX_ACCEL = 60.0            # m/s² ≈ 6g, realistic for racing quad
 _ATTITUDE_RATE_MAX = 4.0     # rad/s max attitude rate
 _G = 9.81
 
@@ -77,7 +80,7 @@ class Physics6DOF:
         initial_pos: np.ndarray | None = None,
         initial_yaw: float = 0.0,
         kp_pos: float = 3.5,
-        kd_pos: float = 2.0,
+        kd_pos: float = 8.0,   # raised 2→8: damps overshoot at high speed (low-drag regime)
         kp_att: float = 8.0,
     ) -> None:
         pos = initial_pos.copy() if initial_pos is not None else np.array([0.0, 0.0, -2.0])
