@@ -60,8 +60,8 @@ _DT = 1.0 / 120.0           # 120 Hz physics
 # regardless of commanded speed. Rebalanced to racing-realistic 6g thrust + low drag
 # so terminal = sqrt(60/0.03) = 44.7 m/s — commanded 38 now actually achievable.
 _DRAG = 0.03                 # aerodynamic drag coefficient
-_MAX_SPEED = 44.0            # m/s — hard speed clip (below terminal so it binds first)
-_MAX_ACCEL = 60.0            # m/s² ≈ 6g, realistic for racing quad
+_MAX_SPEED = 52.0            # m/s — hard speed clip (below terminal 51.6 so terminal binds)
+_MAX_ACCEL = 80.0            # m/s² ≈ 8g, upper end for racing quad; terminal = sqrt(80/0.03) = 51.6
 _ATTITUDE_RATE_MAX = 4.0     # rad/s max attitude rate
 _G = 9.81
 
