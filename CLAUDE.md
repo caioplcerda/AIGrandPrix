@@ -470,6 +470,13 @@ segment order (sprint-first or turns-first) — the approach-blend handles trans
 robustly. Helix at 38 m/s is ~35s isolated (the 105s seen at zenith was over-driving
 the tight helix at 48 m/s, not a turn limit).
 
+### Perception robustness (vision pillar)
+
+YOLO gate detector stress-tested beyond training augmentation (`test_yolo_robustness.py`):
+recall **1.000** through motion blur to 31px, JPEG quality to 8, brightness 0.2-2.8×,
+occlusion to 50% (0.912 at 75%). Baseline P=R=F1=1.0, dist err 1.06m, 11.8ms inference
+(30Hz-capable). Robust within the synthetic domain; true sim-to-real needs the DCL binary.
+
 ### Control design validated OPTIMAL (negative results — don't re-attempt)
 
 Every optimization lever was A/B tested and the existing design wins:
