@@ -326,9 +326,13 @@ def run(args: argparse.Namespace) -> int:
             last_replan = elapsed
             logger.debug("Replanned: %d waypoints for %d gates", len(waypoints), len(remaining_gates))
 
-        # ── Select target waypoint
+        # ── Select target waypoint (speed-adaptive lookahead: pure-pursuit best practice —
+        # grows with speed to build velocity on straights, shrinks to 5m floor on turns
+        # where the drone slows, keeping it tight. Caps at 18m to avoid corner-cutting.)
         if waypoints:
-            wp = planner.next_position_target(waypoints, state.pos_ned, lookahead_m=5.0)
+            speed_now = float(np.linalg.norm(state.vel_ned))
+            lookahead = min(18.0, max(5.0, speed_now * 0.45))
+            wp = planner.next_position_target(waypoints, state.pos_ned, lookahead_m=lookahead)
         else:
             wp = WaypointNED(
                 pos=state.pos_ned.copy(),
@@ -345,14 +349,32 @@ def run(args: argparse.Namespace) -> int:
                 time=elapsed,
             )
 
+        # ── Approach-waypoint velocity blend: fly toward approach point at max_speed.
+        # Only active when approach_pt is still ahead of drone (dot guard prevents backward pull).
+        _APPROACH_DIST = 6.0
+        if remaining_gates:
+            g0 = remaining_gates[0]
+            approach_pt = g0.position - g0.normal * _APPROACH_DIST
+            approach_vec = approach_pt - state.pos_ned
+            dist_to_approach = float(np.linalg.norm(approach_vec))
+            ahead = float(np.dot(approach_vec, g0.normal)) > 0.0
+            if dist_to_approach > 0.1 and ahead:
+                blend = min(1.0, max(0.0, (dist_to_approach - 4.0) / 8.0))
+                approach_vel = approach_vec / dist_to_approach * args.max_speed
+                cmd_vel = blend * approach_vel + (1.0 - blend) * wp.vel
+            else:
+                cmd_vel = wp.vel
+        else:
+            cmd_vel = wp.vel
+
         # ── Send command
         target = PositionTargetNED(
             x=float(wp.pos[0]),
             y=float(wp.pos[1]),
             z=float(wp.pos[2]),
-            vx=float(wp.vel[0]),
-            vy=float(wp.vel[1]),
-            vz=float(wp.vel[2]),
+            vx=float(cmd_vel[0]),
+            vy=float(cmd_vel[1]),
+            vz=float(cmd_vel[2]),
             yaw=float(wp.yaw),
         )
         client.send_position_target(target)

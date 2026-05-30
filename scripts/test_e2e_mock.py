@@ -33,7 +33,7 @@ _VISION_PORT = 15600    # unused by test, server sends here silently
 _N_GATES = 5
 _MAX_DURATION_S = 90.0
 _LOOP_HZ = 50.0
-_MAX_SPEED = 15.0
+_MAX_SPEED = 30.0
 _GATE_PASS_RADIUS_M = 1.5
 _REPLAN_INTERVAL_S = 0.25
 _INNER_HALF = 0.75  # gate inner opening half-width (1.5m / 2)
@@ -206,9 +206,11 @@ def main() -> int:
             waypoints = planner.plan(remaining[:1], state.pos_ned, state.vel_ned)
             last_replan = elapsed
 
-        # Select waypoint target
+        # Select waypoint target (speed-adaptive lookahead — matches run_vq1.py)
         if waypoints:
-            wp = planner.next_position_target(waypoints, state.pos_ned, lookahead_m=5.0)
+            speed_now = float(np.linalg.norm(state.vel_ned))
+            lookahead = min(18.0, max(5.0, speed_now * 0.45))
+            wp = planner.next_position_target(waypoints, state.pos_ned, lookahead_m=lookahead)
         else:
             wp = WaypointNED(pos=state.pos_ned.copy(), vel=np.zeros(3), yaw=state.yaw, time=elapsed)
 
