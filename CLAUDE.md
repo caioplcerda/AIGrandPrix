@@ -465,10 +465,21 @@ primary goal → fixed 5m lookahead.** The e2e is the same speed either way (3.7
 ### Speed ladder + gauntlet
 
 Validated 25→30→33→38→42→48 m/s, all single-pattern batteries 8/8 (fixed-5 lookahead).
-**Gauntlet** (60 gates, all patterns chained slalom→altitude→chaos→helix→hypersonic):
-60/60 at 38 m/s. KEY: transitioning from a max-speed straight INTO a turn fails (can't
-weave at 38 m/s) — turning patterns must precede the sprint. Orbital (helix) courses
-turn-limited (~105s, geometry-bound, not speed-bound).
+**Gauntlet** (60 gates, all patterns chained): 60/60 at 38 m/s AND 48 m/s, in either
+segment order (sprint-first or turns-first) — the approach-blend handles transitions
+robustly. Helix at 38 m/s is ~35s isolated (the 105s seen at zenith was over-driving
+the tight helix at 48 m/s, not a turn limit).
+
+### Control design validated OPTIMAL (negative results — don't re-attempt)
+
+Every optimization lever was A/B tested and the existing design wins:
+- **Anticipatory braking:** unnecessary — hard sprint→turn gauntlet passes 60/60 to
+  48 m/s without it; braking fights the approach-blend and stalls (11/60). See
+  `scripts/test_braking_gauntlet.py`.
+- **Speed-adaptive lookahead:** corner-cuts on weaves (1/60 gauntlet) — fixed-5m wins.
+- **Multi-gate planning depth:** `rem[:1]` is FASTEST (helix 35.6s) and reliable;
+  `rem[:2]` 5× slower (199s), `rem[:3]` corner-cuts (16/20). Single-gate is optimal.
+- **Physics speed ceiling:** near terminal 51.6 m/s (8g); higher = unrealistic for a quad.
 
 ### Course Design Rules (learned the hard way)
 
