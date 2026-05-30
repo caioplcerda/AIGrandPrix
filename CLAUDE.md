@@ -449,8 +449,17 @@ the `max_speed` param only shaped trajectory planning, never achieved speed.
 - `kd_pos` 2.0 → 8.0 — drag had provided implicit velocity damping; the low-drag
   regime needs explicit kd or the drone overshoots gates at speed
 
-**Impact:** VQ1 e2e 5/5 dropped **9.8s → 5.77s (41% faster)**. Drone now genuinely
-reaches 38.9 m/s on straights. 243 unit tests still pass.
+**Impact:** VQ1 e2e 5/5 dropped **9.8s → 5.77s** (drag fix) **→ 3.68s** (speed-adaptive
+lookahead) = **62% faster total**. Drone now genuinely reaches 48 m/s (zenith battery,
+8g physics). 243 unit tests still pass.
+
+### Speed-Adaptive Lookahead (run_vq1.py)
+
+Pure-pursuit lookahead now scales with speed: `clamp(speed*0.45, 5, 18)`. Grows on
+straights to build velocity, shrinks to 5m floor on turns (where the approach blend
+slows the drone). Physics-agnostic — transfers to the real DCL sim. This + the drag
+fix took the e2e from 9.8s to 3.68s. Speed ladder validated 25→30→33→38→42→48 m/s,
+all batteries 8/8. Orbital (helix) courses remain turn-limited (~105s, geometry-bound).
 
 ### Course Design Rules (learned the hard way)
 
