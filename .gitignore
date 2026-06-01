@@ -25,3 +25,8 @@ models/checkpoints/
 runs/
 wandb/
 *.ipynb_checkpoints/
+
+# Large training data + transient (keep repo lean; weights force-added)
+datasets/
+yolov8n.pt
+.claude/scheduled_tasks.lock
