@@ -47,7 +47,7 @@ class PathPlanner:
         max_speed: float = 15.0,
         max_accel: float = 10.0,
         config: dict | None = None,
-        trajectory_speed_frac: float = 0.85,
+        trajectory_speed_frac: float = 0.97,
     ) -> None:
         self.max_speed = max_speed
         self.max_accel = max_accel
