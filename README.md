@@ -172,10 +172,12 @@ Rendered flight videos for the stress courses are in `scripts/hard_courses_3d/`.
 |---|---|
 | `src/aigrandprix/` | The stack — perception, planning, control, comms, mock sim |
 | `run_vq1.py` | Competition entry point |
+| `tests/` | 243 unit tests across 19 modules |
 | `scripts/test_*_courses.py` | Stress batteries, one per difficulty tier |
 | `scripts/hard_courses_3d/` | Rendered flight videos |
-| `docs/` | Engineering log and roadmap |
-| `CLAUDE.md`, `.claude/`, `.genie/` | Agent tooling — see below |
+| `docs/` | Roadmap, task breakdown, study notes |
+| `CLAUDE.md` | Detailed engineering log — phases, findings, tuning history |
+| `.claude/`, `.genie/` | Agent tooling and design notes — see below |
 
 ## On the tooling
 
