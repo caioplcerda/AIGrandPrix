@@ -32,76 +32,76 @@
 ---
 
 ### Track C — NED Refactor + State Estimation ✅ DONE
-`state/state_estimator.py` + `planning/path_planner_ned.py`. NED nativo: X=north, Y=east, Z=down. IMU integration, yaw from ATTITUDE, altitude = -Z. gate_neds → waypoints → POSITION_TARGET.
+`state/state_estimator.py` + `planning/path_planner_ned.py`. Native NED: X=north, Y=east, Z=down. IMU integration, yaw from ATTITUDE, altitude = -Z. gate_neds → waypoints → POSITION_TARGET.
 
 ---
 
 ---
 
 ### Track D — Vision CNN
-**Responsável:** 1-2 pessoas | **Dias:** 18-22
+**Owners:** 1-2 people | **Days:** 18-22
 
-| # | Tarefa | Entrega |
+| # | Task | Deliverable |
 |---|--------|---------|
-| D1 | Gerador de dataset sintético: gate 2.7m outer / 1.5m inner (azul escuro, ~RGB 20,40,180) em 640×360, perspectiva correta, câmera tiltada +20°, fundo variado (texturas, gradientes, cor sólida), range de distância 2m-15m, ângulos ±45°, iluminação variada | 5.000+ imagens anotadas (bbox YOLO) |
-| D2 | Fallback detector clássico HSV: segmentar azul do gate, bbox da região conectada maior | Detecta gates no mock em <1ms |
-| D3 | Treinar YOLOv8n: 80% train / 20% val, 50 epochs, batch 32, aug horizontal flip + brightness | mAP@0.5 >0.85 |
-| D4 | Exportar pesos TorchScript + testar inference <15ms em CPU mid-tier | Tempo medido |
-| D5 | Pipeline de percepção: recebe frame JPEG 640×360 → detecta gate → output: (cx, cy) pixels + confidence + bbox | Interface limpa |
-| D6 | Converter detecção pixel → bearing NED relativo + estimativa de distância (usando largura conhecida do gate 2.7m e fx=320) | (bearing_h, bearing_v, dist_est) em metros |
-| D7 | Integrar em `gate_detector.py`: fallback chain = CNN → HSV → None | Detector atualizado |
-| D8 | Testes de percepção com hold-out 200 imagens | IoU>0.7 em 85%+ |
+| D1 | Synthetic dataset generator: gate 2.7 m outer / 1.5 m inner (dark blue, ~RGB 20,40,180) at 640×360, correct perspective, camera tilted +20°, varied backgrounds (textures, gradients, solid colour), distance range 2-15 m, angles ±45°, varied lighting | 5,000+ annotated images (YOLO bbox) |
+| D2 | Classical HSV fallback detector: segment the gate's blue, bbox of the largest connected region | Detects gates in the mock in <1 ms |
+| D3 | Train YOLOv8n: 80% train / 20% val, 50 epochs, batch 32, augmentation horizontal flip + brightness | mAP@0.5 >0.85 |
+| D4 | Export TorchScript weights, test inference <15 ms on a mid-tier CPU | Measured time |
+| D5 | Perception pipeline: take a 640×360 JPEG frame → detect gate → output (cx, cy) pixels + confidence + bbox | Clean interface |
+| D6 | Convert pixel detection → relative NED bearing + distance estimate (using the known 2.7 m gate width and fx=320) | (bearing_h, bearing_v, dist_est) in metres |
+| D7 | Integrate into `gate_detector.py`: fallback chain = CNN → HSV → None | Detector updated |
+| D8 | Perception tests on a 200-image hold-out | IoU>0.7 on 85%+ |
 
-**Formula distância:** `dist = (gate_width_m * fx) / bbox_width_px`
+**Distance formula:** `dist = (gate_width_m * fx) / bbox_width_px`
 
 ---
 
 ### Track E — Planner + Controller Adapter
-**Responsável:** 1 pessoa | **Dias:** 20-22
+**Owners:** 1 person | **Days:** 20-22
 
-> Depende de C (NED, state estimator) e A (cliente MAVLink)
+> Depends on C (NED, state estimator) and A (MAVLink client)
 
-| # | Tarefa | Entrega |
+| # | Task | Deliverable |
 |---|--------|---------|
-| E1 | Loop principal: 50Hz, consome state estimator (pos_ned, vel_ned, yaw), envia POSITION_TARGET via cliente A | Loop estável |
+| E1 | Main loop: 50 Hz, consumes the state estimator (pos_ned, vel_ned, yaw), sends POSITION_TARGET via the Track A client | Stable loop |
 | E2 | Gate sequencing: advance to the next gate once the drone is within 1.5 m of centre | Automatic sequencing |
-| E3 | Waypoint NED para POSITION_TARGET: `(x,y,z)` + `(vx,vy,vz)` lookahead + `yaw` alinhado com gate | Mensagem correta |
-| E4 | Approach profile: desacelera para 3 m/s a 5m antes do gate, acelera após passar | Parâmetros configuráveis |
-| E5 | Heartbeat separado em thread a 2Hz | Nunca cai abaixo de 2Hz |
-| E6 | Integrar detecção de visão (D6): bearing → corrigir posição estimada do gate quando CNN confirma | Correção de posição |
-| E7 | Hover fallback: se state estimator perde confiança ou cmd loop trava >500ms, enviar hover cmd | Safety wrapper |
-| E8 | Benchmark: fechar 5 gates no mock, medir tempo, log de gates passados | Tempo + gates medidos |
+| E3 | NED waypoint → POSITION_TARGET: `(x,y,z)` + `(vx,vy,vz)` lookahead + `yaw` aligned with the gate | Correct message |
+| E4 | Approach profile: decelerate to 3 m/s at 5 m before the gate, accelerate after passing | Configurable parameters |
+| E5 | Heartbeat on its own thread at 2 Hz | Never drops below 2 Hz |
+| E6 | Integrate vision detection (D6): bearing → correct the estimated gate position when the CNN confirms | Position correction |
+| E7 | Hover fallback: if the state estimator loses confidence or the command loop stalls >500 ms, send a hover command | Safety wrapper |
+| E8 | Benchmark: clear 5 gates in the mock, measure time, log gates passed | Time + gates measured |
 
 ---
 
-### Track F — Integração + Windows CI
-**Responsável:** 1 pessoa | **Dias:** 21-23
+### Track F — Integration + Windows CI
+**Owners:** 1 person | **Days:** 21-23
 
-| # | Tarefa | Entrega |
+| # | Task | Deliverable |
 |---|--------|---------|
-| F1 | Setup Windows 11 + Python 3.14.2 + venv + instalar deps (pymavlink, torch, ultralytics, opencv, numpy, scipy) | Import sem erros |
-| F2 | Clonar repo, rodar mock sim + cliente autonomia no mesmo Windows | Stack sobe |
-| F3 | E2E test: autonomia fecha 5 gates no mock, Windows, Python 3.14.2 | Log de gates passados |
-| F4 | requirements_vq1.txt: versões fixadas de todas as deps | Reproducível |
-| F5 | Script de entrada único: `python run_vq1.py --host <ip> --port <port>` (substitui `dcl_adapter.py` stub) | Drop-in para sim DCL |
-| F6 | Benchmark final: 3 seeds × 5 gates, Windows, mock, medir tempo médio | Relatório de performance |
-| F7 | Atualizar CLAUDE.md com Phase 6 results | CLAUDE.md atualizado |
+| F1 | Set up Windows 11 + Python 3.14.2 + venv + install deps (pymavlink, torch, ultralytics, opencv, numpy, scipy) | Imports without errors |
+| F2 | Clone the repo, run the mock sim + autonomy client on the same Windows machine | Stack comes up |
+| F3 | E2E test: autonomy clears 5 gates in the mock on Windows, Python 3.14.2 | Log of gates passed |
+| F4 | requirements_vq1.txt: pinned versions for every dep | Reproducible |
+| F5 | Single entry point: `python run_vq1.py --host <ip> --port <port>` (replaces the `dcl_adapter.py` stub) | Drop-in for the DCL sim |
+| F6 | Final benchmark: 3 seeds × 5 gates, Windows, mock, mean time | Performance report |
+| F7 | Update CLAUDE.md with Phase 6 results | CLAUDE.md updated |
 
 ---
 
 ## Checkpoint — 2026-05-22
 
-**Critério de freeze:**
-- [x] 5 gates no mock em ≥1 seed (10.79s) ✅
+**Freeze criteria:**
+- [x] 5 gates in the mock on ≥1 seed (10.79 s) ✅
 - [ ] Vision CNN mAP@0.5 > 0.80
-- [ ] Integração visão → loop sem erro
-- [ ] Windows 11 Python 3.14.2 importa e roda sem erro
+- [ ] Vision → loop integration with no errors
+- [ ] Windows 11 Python 3.14.2 imports and runs without error
 
 If the CNN is not ready, fall back to the HSV detector already implemented in `gate_detector.py`. The minimum core already works without vision.
 
 ---
 
-## Estrutura atual de arquivos
+## Current file structure
 
 ```
 src/aigrandprix/
@@ -119,8 +119,8 @@ src/aigrandprix/
 │   └── path_planner_ned.py   ✅ DONE — NED wrapper
 ├── perception/
 │   ├── data_generator.py     ✅ DONE — 640×360, tilt +20°, COCO format
-│   ├── gate_detector.py      ⚠️ backend YOLO sem pesos treinados
-│   └── cnn_model.py          ⚠️ arquitetura OK, sem pesos
+│   ├── gate_detector.py      ⚠️ YOLO backend, no trained weights yet
+│   └── cnn_model.py          ⚠️ architecture OK, no weights
 ├── control/                  (legacy, gym_env)
 ├── submission/               (stub awaiting DCL API)
 └── run_vq1.py                ✅ DONE — entry point completo
@@ -139,21 +139,21 @@ scripts/
 
 ---
 
-## Quick wins se o tempo apertar
+## Quick wins if time runs short
 
-| Situação | Fallback |
+| Situation | Fallback |
 |----------|----------|
 | CNN fails to converge | Blue HSV detector: `cv2.inRange(hsv, (100,80,40), (130,255,255))` |
-| State estimation deriva muito | Usar vel_ned integrada só por 10s e resetar com gate pass como âncora |
-| Windows 11 sem máquina | Paperspace A4000 Windows ($0.76/hr) ou GeForce NOW Enterprise |
-| JPEG stream difícil de reconstituir | Testar com frames inteiros primeiro (mock sem chunking), depois adicionar |
+| State estimate drifts badly | Integrate vel_ned for 10 s only, reset using a gate pass as the anchor |
+| No Windows 11 machine | Paperspace A4000 Windows ($0.76/hr) or GeForce NOW Enterprise |
+| JPEG stream hard to reassemble | Test with whole frames first (mock without chunking), then add chunking |
 
 ---
 
-## Arquivo de submissão esperado
+## Expected submission form
 
-Quando sim DCL liberar, submissão deve ser:
+Once the DCL sim is released, submission should be:
 ```bash
 python run_vq1.py --host <dcl_sim_ip> --mavlink_port 14550 --vision_port 5600
 ```
-Sem código adicional, sem mudança de lógica — só IP/porta.
+No extra code, no logic change — only IP/port.

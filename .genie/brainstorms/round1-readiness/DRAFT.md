@@ -4,51 +4,51 @@
 |-------|-------|
 | **Slug** | `round1-readiness` |
 | **Date** | 2026-05-17 |
-| **Deadline** | 2026-05-23 (6 dias) |
+| **Deadline** | 2026-05-23 (6 days) |
 | **WRS** | 40/100 |
 | **Status** | Simmering |
-| **Sim DCL** | NÃO LIBERADO — temos só a spec VADR-TS-002. Estratégia forçada: construir mock MAVLink2/UDP fiel à spec + autonomia rodando contra ele. Quando o sim oficial sair, troca de endpoint deve ser drop-in. |
+| **DCL sim** | NOT RELEASED — we have only spec VADR-TS-002. Forced strategy: build a MAVLink2/UDP mock faithful to the spec and run the autonomy against it. When the official sim ships, swapping the endpoint must be drop-in. |
 
-## Contexto recém-incorporado
+## Newly incorporated context
 
-### Spec oficial VADR-TS-002 Issue 00.02 (2026-05-08)
+### Official spec VADR-TS-002 Issue 00.02 (2026-05-08)
 
-| Área | Especificação real | Nosso código atual | Gap |
-|------|--------------------|--------------------|-----|
-| **Protocolo** | MAVLink2 sobre UDP, MAVSDK-compatible | `gym_env` interface Python interna | CRÍTICO — falta camada MAVLink |
-| **Comandos** | `SET_POSITION_TARGET_LOCAL_NED` ou `SET_ATTITUDE_TARGET` | Thrust ∈ [0,1] + pitch/roll rate diretos | CRÍTICO — interface não bate |
-| **Coordenadas** | NED (X north, Y east, Z **down**) | ENU implícito (Z up) | GRANDE — refator amplo |
-| **Estado** | Sem GPS, sem posição global. Só `ATTITUDE` + `HIGHRES_IMU` + visão | `obs["position"]` lido direto do sim | CRÍTICO — falta state estimation |
-| **Telemetria** | attitude, orientation, linear velocities, status flags | full state synthetic | Médio |
-| **Câmera** | 640×360 @ 30Hz, pinhole, cx,cy=320,180, fx,fy=320,320, VFoV 90°, tilt **+20° up** body | Sim retorna imagens em branco | CRÍTICO — sem treino de visão |
-| **Vision stream** | UDP porta 5600, header 24B + JPEG chunks | N/A | Implementar parser |
-| **Physics** | Rigid-body 120Hz, thrust + drag + gravity + collision | Modelo simplificado a 50Hz | Médio |
-| **Timing** | Command rate < 100Hz, heartbeat ≥ 2Hz | Loop interno @ 50Hz | OK |
-| **Gates** | Outer 2.7×2.7×0.26m, inner opening 1.5×1.5m | Geometria assumida sem dimensões oficiais | Pequeno — calibrar |
-| **Drone** | 280×280×160mm chassis | Geometria genérica | Pequeno |
-| **OS** | Windows 11 obrigatório (Linux **não** suportado) | Dev em macOS | CRÍTICO — máquina de teste |
-| **Python** | 3.14.2 validado (livre escolha) | 3.10+ | Pequeno — validar 3.14 |
-| **Internet** | Conexão ativa exigida (anti-cheat) | N/A | Logístico |
-| **VQ1** | < 10 gates, max 8 min, foco em **completion** | OK (preparado para 10) | OK |
-| **VQ2** | < 20 gates, ambiente complexo, tempo mais rápido vence | — | Fase 2 |
+| Area | Actual specification | Our current code | Gap |
+|------|----------------------|------------------|-----|
+| **Protocol** | MAVLink2 over UDP, MAVSDK-compatible | `gym_env`, an internal Python interface | CRITICAL — no MAVLink layer |
+| **Commands** | `SET_POSITION_TARGET_LOCAL_NED` or `SET_ATTITUDE_TARGET` | Thrust ∈ [0,1] + direct pitch/roll rates | CRITICAL — interface does not match |
+| **Coordinates** | NED (X north, Y east, Z **down**) | Implicit ENU (Z up) | LARGE — broad refactor |
+| **State** | No GPS, no global position. Only `ATTITUDE` + `HIGHRES_IMU` + vision | `obs["position"]` read straight from the sim | CRITICAL — no state estimation |
+| **Telemetry** | attitude, orientation, linear velocities, status flags | full synthetic state | Medium |
+| **Camera** | 640×360 @ 30 Hz, pinhole, cx,cy=320,180, fx,fy=320,320, VFoV 90°, tilt **+20° up** in body frame | Sim returns blank images | CRITICAL — no vision training |
+| **Vision stream** | UDP port 5600, 24-byte header + JPEG chunks | N/A | Parser to implement |
+| **Physics** | Rigid body 120 Hz, thrust + drag + gravity + collision | Simplified model at 50 Hz | Medium |
+| **Timing** | Command rate < 100 Hz, heartbeat ≥ 2 Hz | Internal loop @ 50 Hz | OK |
+| **Gates** | Outer 2.7×2.7×0.26 m, inner opening 1.5×1.5 m | Geometry assumed, no official dimensions | Small — calibrate |
+| **Drone** | 280×280×160 mm chassis | Generic geometry | Small |
+| **OS** | Windows 11 required (Linux **not** supported) | Developing on macOS | CRITICAL — need a test machine |
+| **Python** | 3.14.2 validated (free choice) | 3.10+ | Small — validate 3.14 |
+| **Internet** | Active connection required (anti-cheat) | N/A | Logistical |
+| **VQ1** | < 10 gates, max 8 min, focus on **completion** | OK (prepared for 10) | OK |
+| **VQ2** | < 20 gates, complex environment, fastest time wins | — | Phase 2 |
 
-### Updates do site (consolidado 2026-02-09 → 2026-05-08)
-- IP retido pelos times. Sem taxa de entrada.
-- Múltiplas instâncias paralelas permitidas (escalar testes).
-- Funcionários FT de parceiros (Anduril/DCL/Neros) inelegíveis.
-- Atualização de roster permitida após VQ1 iniciar.
-- Hardware mínimo: i5-10400F, RTX 2060 Super, 16GB RAM, 60GB.
+### Site updates (consolidated 2026-02-09 → 2026-05-08)
+- IP retained by the teams. No entry fee.
+- Multiple parallel instances allowed (scale testing).
+- Full-time employees of partners (Anduril/DCL/Neros) ineligible.
+- Roster updates permitted after VQ1 begins.
+- Minimum hardware: i5-10400F, RTX 2060 Super, 16 GB RAM, 60 GB.
 
-## Implicações estratégicas
+## Strategic implications
 
-1. **O stack interno está estruturalmente desalinhado.** O `gym_env` simplificado nos deu 100% de gate completion em um modelo que **não é** o simulador oficial. Esses resultados não transferem.
-2. **A interface real é MAVLink2/UDP** — precisamos de um bridge novo, não adaptar o existente.
-3. **Não há posição absoluta** — temos que fazer VIO/odometria de IMU+visão, ou usar a integração de velocidade linear que o sim entrega (ATTITUDE + linear_velocities). Crítico discutir.
-4. **Visão é mandatória** — sem CNN treinada não passamos um gate. Não tem ground-truth de gate position no protocolo real.
-5. **Tilt da câmera +20°** muda a projeção de gate — geometria de approach precisa considerar.
-6. **NED**: refator de eixos no planning, control, perception.
-7. **Windows 11**: precisamos de máquina/VM para teste real. macOS é só dev.
-8. **6 dias para tudo isso** com equipe — paralelizar é mandatório.
+1. **The internal stack is structurally misaligned.** The simplified `gym_env` gave us 100% gate completion against a model that **is not** the official simulator. Those results do not transfer.
+2. **The real interface is MAVLink2/UDP** — this needs a new bridge, not an adaptation of the existing one.
+3. **There is no absolute position** — we have to do VIO/odometry from IMU + vision, or use the linear-velocity integration the sim provides (ATTITUDE + linear_velocities). Needs discussion.
+4. **Vision is mandatory** — without a trained CNN we do not pass a single gate. The real protocol carries no ground-truth gate position.
+5. **The +20° camera tilt** changes the gate projection; approach geometry has to account for it.
+6. **NED**: axis refactor across planning, control and perception.
+7. **Windows 11**: we need a machine or VM for real testing. macOS is development only.
+8. **Six days for all of this** with a team — parallelizing is mandatory.
 
 ## WRS
 
@@ -57,21 +57,21 @@ WRS: ████░░░░░░ 20/100
  Problem ✅ | Scope ░ | Decisions ░ | Risks ░ | Criteria ░
 ```
 
-- **Problem ✅** — Stack atual desalinhada com spec oficial recém-lançada; precisamos refator + integração MAVLink + visão treinada + ambiente Windows até 2026-05-23 para submeter ao VQ1.
-- **Scope ░** — aguardando decisão sobre escopo (refator total vs. adapter fino vs. estratégia híbrida).
-- **Decisions ░** — pendente: estratégia de interface, abordagem de state estimation, prioridade visão, ambiente de teste.
-- **Risks ░** — listar após decisões.
-- **Criteria ░** — definir após escopo (ex: "passar 5 gates em sim DCL em 60s @ 95% reliability").
+- **Problem ✅** — Current stack misaligned with the newly released official spec; we need a refactor plus MAVLink integration, a trained vision model and a Windows environment by 2026-05-23 to submit to VQ1.
+- **Scope ░** — awaiting a scope decision (full refactor vs. thin adapter vs. hybrid).
+- **Decisions ░** — pending: interface strategy, state-estimation approach, vision priority, test environment.
+- **Risks ░** — to list once decisions are made.
+- **Criteria ░** — to define once scope is set (e.g. "pass 5 gates in the DCL sim in 60 s at 95% reliability").
 
-## Histórico de decisões
+## Decision history
 
-(vazio — aguardando primeira rodada de Q&A)
+(empty — awaiting the first Q&A round)
 
-## Próximas escolhas a discutir (ordem)
+## Next choices to discuss (in order)
 
-1. **Escopo:** decompor em sub-projetos paralelos ou stack único integrado?
-2. **Estratégia de interface MAVLink:** bridge nativo vs. simulador interno + adapter?
-3. **State estimation:** VIO próprio vs. integração de IMU + landmarks vs. depender do que o sim expõe?
-4. **Visão:** treino do zero, transfer learning, ou detector clássico (cor azul do gate)?
-5. **Ambiente Windows:** VM Parallels/UTM, máquina física, ou cloud (paperspace)?
-6. **Composição da equipe:** quantas pessoas, especialidades, como dividir tracks?
+1. **Scope:** decompose into parallel sub-projects, or one integrated stack?
+2. **MAVLink interface strategy:** native bridge vs. internal simulator + adapter?
+3. **State estimation:** our own VIO vs. IMU integration + landmarks vs. relying on what the sim exposes?
+4. **Vision:** train from scratch, transfer learning, or a classical detector (the gate's blue)?
+5. **Windows environment:** Parallels/UTM VM, physical machine, or cloud (Paperspace)?
+6. **Team composition:** how many people, which specialities, how to split the tracks?

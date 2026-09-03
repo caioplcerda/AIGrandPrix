@@ -1,4 +1,4 @@
-# Design: Round 1 Readiness — Rebuild para Spec Oficial VADR-TS-002
+# Design: Round 1 Readiness — Rebuild for Official Spec VADR-TS-002
 
 | Field | Value |
 |-------|-------|
@@ -10,85 +10,85 @@
 
 ## Problem
 
-Stack atual (gym_env interno, ENU, posição absoluta, thrust direto) é incompatível com a interface real do simulador DCL. O simulador usa MAVLink2/UDP, NED sem GPS, visão real obrigatória, e o sim oficial ainda não foi liberado — temos só a spec. Precisamos refatorar completamente o stack para ser plug-and-play quando o binário liberar, validando contra mock fiel que construímos, com equipe de 4-8 pessoas até 2026-05-23.
+The current stack (internal gym_env, ENU, absolute position, direct thrust) is incompatible with the real DCL simulator interface. The simulator uses MAVLink2/UDP, NED without GPS, and mandatory real vision — and the official sim has not been released, so we have only the spec. We need to refactor the stack completely so it is plug-and-play when the binary ships, validating against a faithful mock we build ourselves, with a team of 4-8 people, by 2026-05-23.
 
 ## Scope
 
 ### IN
-- Mock DCL Sim: servidor UDP fiel à VADR-TS-002 (MAVLink2, visão JPEG 640×360 por UDP 5600)
-- Cliente MAVLink2/UDP Python (pymavlink): heartbeat, ATTITUDE, HIGHRES_IMU, SET_POSITION_TARGET_LOCAL_NED
-- Refator NED completo em todo o stack (planning, control, perception)
-- State estimator: quaternion attitude + integração de velocidade linear (sem GPS)
-- Vision CNN: dataset sintético gates 2.7×2.7m (câmera 640×360, tilt +20°), YOLOv8n treinado, output pixel→bearing→pos NED relativa
-- Loop de controle principal: 50Hz, heartbeat 2Hz, cmd <100Hz
-- Ambiente Windows 11 (Python 3.14.2) validado e benchmark e2e
+- Mock DCL sim: UDP server faithful to VADR-TS-002 (MAVLink2, 640×360 JPEG vision over UDP 5600)
+- Python MAVLink2/UDP client (pymavlink): heartbeat, ATTITUDE, HIGHRES_IMU, SET_POSITION_TARGET_LOCAL_NED
+- Full NED refactor across the stack (planning, control, perception)
+- State estimator: quaternion attitude + linear-velocity integration (no GPS)
+- Vision CNN: synthetic dataset of 2.7×2.7 m gates (640×360 camera, +20° tilt), trained YOLOv8n, output pixel→bearing→relative NED position
+- Main control loop: 50 Hz, heartbeat 2 Hz, command rate <100 Hz
+- Windows 11 environment (Python 3.14.2) validated, plus an end-to-end benchmark
 
 ### OUT
-- SET_ATTITUDE_TARGET (reservado para Round 2 / curvas agressivas)
+- SET_ATTITUDE_TARGET (reserved for Round 2 / aggressive turns)
 - RL training pipeline
-- VQ2 features (20 gates, ambiente complexo)
-- Fine-tune com dados do sim oficial (pós-liberação)
-- Deploy no sim DCL real (depende do binário)
+- VQ2 features (20 gates, complex environment)
+- Fine-tuning on official sim data (post-release)
+- Deployment on the real DCL sim (depends on the binary)
 
 ## Approach
 
-**Mock-first, drop-in swap.** Construímos nosso próprio servidor UDP que emula exatamente a spec VADR-TS-002. Todo o desenvolvimento e validação acontece contra esse mock. Quando o sim DCL liberar, troca de IP/porta deve ser suficiente.
+**Mock-first, drop-in swap.** We build our own UDP server that emulates the VADR-TS-002 spec exactly. All development and validation happens against that mock. When the DCL sim is released, changing IP and port should be sufficient.
 
-**6 tracks paralelos** para 4-8 pessoas:
+**6 parallel tracks** for 4-8 people:
 
-| Track | Owner | Dias | Entrega |
-|-------|-------|------|---------|
-| A — MAVLink Client | 1-2p | 18-20 | Cliente Python conecta, heartbeat loop, recebe telemetria, envia POSITION_TARGET |
-| B — Mock DCL Sim | 1-2p | 18-21 | Servidor UDP: MAVLink2 pub/sub + 6DOF 120Hz + vision stream JPEG UDP 5600 |
-| C — NED Refactor + State Estimation | 1p | 18-20 | ENU→NED em todo o stack; state estimator quat+vel_int sem GPS |
-| D — Vision CNN | 1-2p | 18-22 | Dataset sintético + YOLOv8n treinado + pixel→NED gate bearing |
-| E — Planner/Controller Adapter | 1p | 20-22 | state→planner→MAVLink POSITION_TARGET; gate sequencing autônomo |
-| F — Integração + Windows CI | 1p | 21-23 | E2E no mock (Windows 11, Python 3.14.2); benchmark substituindo gym_env |
+| Track | Owner | Days | Deliverable |
+|-------|-------|------|-------------|
+| A — MAVLink Client | 1-2p | 18-20 | Python client connects, heartbeat loop, receives telemetry, sends POSITION_TARGET |
+| B — Mock DCL Sim | 1-2p | 18-21 | UDP server: MAVLink2 pub/sub + 6-DOF at 120 Hz + JPEG vision stream on UDP 5600 |
+| C — NED Refactor + State Estimation | 1p | 18-20 | ENU→NED across the stack; state estimator, quaternion + velocity integration, no GPS |
+| D — Vision CNN | 1-2p | 18-22 | Synthetic dataset + trained YOLOv8n + pixel→NED gate bearing |
+| E — Planner/Controller Adapter | 1p | 20-22 | state→planner→MAVLink POSITION_TARGET; autonomous gate sequencing |
+| F — Integration + Windows CI | 1p | 21-23 | End-to-end on the mock (Windows 11, Python 3.14.2); benchmark replacing gym_env |
 
-**Cronograma:**
+**Schedule:**
 
-| Data | Marco |
-|------|-------|
-| 2026-05-17 | Kickoff: assign tracks, setup repos |
+| Date | Milestone |
+|------|-----------|
+| 2026-05-17 | Kickoff: assign tracks, set up repos |
 | 2026-05-18 | Tracks A, B, C, D start |
-| 2026-05-20 | A+B integration point: cliente conecta no mock, heartbeat OK |
-| 2026-05-21 | C+E integration: state estimator → planner → POSITION_TARGET no mock |
-| 2026-05-22 | D integration: visão detecta gates no stream do mock |
-| 2026-05-23 | Full E2E: drone fecha 5 gates no mock Windows; FREEZE |
+| 2026-05-20 | A+B integration point: client connects to the mock, heartbeat OK |
+| 2026-05-21 | C+E integration: state estimator → planner → POSITION_TARGET on the mock |
+| 2026-05-22 | D integration: vision detects gates in the mock's stream |
+| 2026-05-23 | Full E2E: drone clears 5 gates on the mock under Windows; FREEZE |
 
 ## Decisions
 
-| Decisão | Rationale |
-|---------|-----------|
-| SET_POSITION_TARGET_LOCAL_NED como primário | Sim DCL tem inner-loop nativo; planner já produz pos+vel+yaw; elimina sintonia de gains; ATTITUDE_TARGET reservado para Round 2 |
-| Mock-first (não blind-code) | Sem sim oficial, toda validação seria cega. Mock baseado em spec dá feedback real e torna swap trivial |
-| YOLOv8n para visão | Speed/accuracy adequado para gate detection; pesos TorchScript exportáveis; inference <10ms em GPU mid-tier |
-| pymavlink sobre MAVSDK-python | Menor overhead, controle fino dos frames MAVLink, mais fácil de debugar em Python puro |
-| Python 3.14.2 target | Spec cita 3.14.2 como validado; rodar em 3.10 localmente durante dev, validar 3.14 em track F |
-| NED em todo o stack (não adapter) | Adapter de conversão acumula bugs silenciosos em races numéricas; custo de refator 1x justifica |
-| gym_env mantido como legacy | Não deletar — mantém 243 testes passando como regressão; novo stack é código separado |
+| Decision | Rationale |
+|----------|-----------|
+| SET_POSITION_TARGET_LOCAL_NED as primary | The DCL sim has a native inner loop; the planner already produces pos+vel+yaw; removes gain tuning. ATTITUDE_TARGET reserved for Round 2 |
+| Mock-first (not blind coding) | Without the official sim, all validation would be blind. A spec-derived mock gives real feedback and makes the swap trivial |
+| YOLOv8n for vision | Speed/accuracy suitable for gate detection; TorchScript-exportable weights; inference <10 ms on a mid-tier GPU |
+| pymavlink over MAVSDK-python | Lower overhead, fine control of MAVLink frames, easier to debug in pure Python |
+| Python 3.14.2 target | Spec cites 3.14.2 as validated; develop locally on 3.10, validate 3.14 in track F |
+| NED across the whole stack (not an adapter) | A conversion adapter accumulates silent bugs in numerical races; the one-off refactor cost is justified |
+| gym_env kept as legacy | Do not delete — it keeps 243 tests passing as a regression suite; the new stack is separate code |
 
 ## Risks & Assumptions
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| Mock diverge do sim DCL real quando liberar | High | Mock gerado diretamente da spec; manter changelog de premissas; re-testar imediatamente ao receber binário |
-| Vision CNN não generaliza para rendering do DCL | High | Dataset sintético variado (iluminação, backgrounds, ângulos); fallback detector clássico por cor azul HSV |
-| Python 3.14.2 quebra dependências (torch, opencv, pymavlink) | Medium | Testar em track F dia 18; se quebrar, isolar em venv 3.14 e fixar versões com pip freeze |
-| Windows 11 sem máquina física disponível | Medium | Parallels/UTM em Apple Silicon funciona para dev; para performance real, baremental ou cloud GPU Windows (paperspace) |
-| 6 dias é tight para visão treinada + E2E | Medium | CNN fallback: detector HSV de gate azul (<30 min de implementar) se treino não convergir |
-| Sim DCL pode usar protocolo diferente do documentado | Low | Spec é oficial VADR-TS-002 — mas gravar todos os frames UDP no primeiro teste real para debug |
-| State estimation deriva sem GPS | Medium | Usar velocidade linear do HIGHRES_IMU (integrada, não acumulada) + reset de posição no arme |
+| Mock diverges from the real DCL sim on release | High | Mock derived directly from the spec; keep a changelog of assumptions; re-test immediately on receiving the binary |
+| Vision CNN does not generalize to DCL's rendering | High | Varied synthetic dataset (lighting, backgrounds, angles); classical blue-HSV fallback detector |
+| Python 3.14.2 breaks dependencies (torch, opencv, pymavlink) | Medium | Test in track F on day 18; if broken, isolate in a 3.14 venv and pin versions with pip freeze |
+| No physical Windows 11 machine available | Medium | Parallels/UTM on Apple Silicon works for development; for real performance, bare metal or a Windows cloud GPU (Paperspace) |
+| Six days is tight for trained vision plus E2E | Medium | CNN fallback: blue-gate HSV detector (<30 min to implement) if training does not converge |
+| The DCL sim may use a protocol different from the documented one | Low | The spec is official VADR-TS-002 — but record every UDP frame on the first real test for debugging |
+| State estimate drifts without GPS | Medium | Use linear velocity from HIGHRES_IMU (integrated, not accumulated) + position reset on arming |
 
 ## Success Criteria
 
-- [ ] MAVLink client conecta no mock, mantém heartbeat 2Hz por 10 min sem drop
-- [ ] Cliente recebe ATTITUDE + HIGHRES_IMU a 120Hz, latência <5ms
-- [ ] Cliente envia SET_POSITION_TARGET_LOCAL_NED, mock integra posição corretamente
-- [ ] Vision stream UDP 5600 recebido e JPEG reconstituído corretamente de chunks
-- [ ] State estimator produz pos_ned, vel_ned, yaw com drift <1m em 30s de voo hover
-- [ ] CNN detecta gate central com IoU>0.7 em imagens sintéticas (hold-out set 200 imagens)
-- [ ] Stack completo fecha 5/5 gates sequencialmente no mock sem crash em 3 seeds distintas
-- [ ] Run completo em <8 min (max run duration do VQ1)
-- [ ] Roda em Windows 11 Python 3.14.2 sem erros de import
-- [ ] Swap de endpoint (mock→DCL real) requer apenas mudança de IP/porta em config
+- [ ] MAVLink client connects to the mock, holds a 2 Hz heartbeat for 10 min with no drops
+- [ ] Client receives ATTITUDE + HIGHRES_IMU at 120 Hz, latency <5 ms
+- [ ] Client sends SET_POSITION_TARGET_LOCAL_NED, mock integrates position correctly
+- [ ] Vision stream on UDP 5600 received and JPEG correctly reassembled from chunks
+- [ ] State estimator produces pos_ned, vel_ned, yaw with <1 m drift over 30 s of hover
+- [ ] CNN detects the central gate with IoU>0.7 on synthetic images (200-image hold-out set)
+- [ ] Full stack clears 5/5 gates sequentially on the mock without crashing, on 3 distinct seeds
+- [ ] Complete run in <8 min (VQ1 max run duration)
+- [ ] Runs on Windows 11 Python 3.14.2 with no import errors
+- [ ] Swapping endpoint (mock→real DCL) requires only an IP/port change in config
