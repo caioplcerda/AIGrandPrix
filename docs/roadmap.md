@@ -122,7 +122,7 @@ src/aigrandprix/
 │   ├── gate_detector.py      ⚠️ backend YOLO sem pesos treinados
 │   └── cnn_model.py          ⚠️ arquitetura OK, sem pesos
 ├── control/                  (legacy, gym_env)
-├── submission/               (stub aguarda API DCL)
+├── submission/               (stub awaiting DCL API)
 └── run_vq1.py                ✅ DONE — entry point completo
 scripts/
 └── test_e2e_mock.py          ✅ DONE — E2E: 5/5 gates 10.79s
