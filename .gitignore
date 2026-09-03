@@ -30,3 +30,7 @@ wandb/
 datasets/
 yolov8n.pt
 .claude/scheduled_tasks.lock
+
+# Organizers' spec document — not ours to redistribute
+260508_Technical_Spec_0002.pdf
+*Technical_Spec*.pdf

@@ -1,20 +1,20 @@
-# AI Grand Prix — Próximos Passos até VQ1 (deadline: 2026-05-23)
+# AI Grand Prix — Roadmap to VQ1 (deadline: 2026-05-23)
 
-> Atualizado em 2026-05-17. Spec oficial: VADR-TS-002 Issue 00.02 (2026-05-08).
-> Design completo: `.genie/brainstorms/round1-readiness/DESIGN.md`
+> Updated 2026-05-17. Official spec: VADR-TS-002 Issue 00.02 (2026-05-08), not redistributed here.
+> Full design: `.genie/brainstorms/round1-readiness/DESIGN.md`
 
-## Status atual (2026-05-17)
+## Status as of 2026-05-17
 
-**Tracks A, B, C — COMPLETOS.** MAVLink-native stack funcionando:
-- E2E mock: 5/5 gates, 10.79s, 243 testes passando
+**Tracks A, B, C — COMPLETE.** MAVLink-native stack working:
+- E2E mock: 5/5 gates, 10.79s, 243 tests passing
 - Entry point: `python run_vq1.py --host <ip> --mavlink_port 14550`
-- Sim DCL binary: ainda não liberado. Mock é drop-in fiel.
+- DCL sim binary: not yet released. The mock is a faithful drop-in for the documented interface.
 
-**Falta:** Tracks D (visão CNN), E (integração visão→loop), F (Windows 11).
+**Remaining:** Tracks D (vision CNN), E (vision→loop integration), F (Windows 11).
 
 ---
 
-## Tracks Restantes
+## Remaining Tracks
 
 ### Track A — MAVLink Client ✅ DONE
 `comms/mavlink_client.py` + `comms/vision_stream.py`. pymavlink 2.4.49. Heartbeat 2Hz, recv ATTITUDE+HIGHRES_IMU, send SET_POSITION_TARGET_LOCAL_NED, vision stream 640×360 reassembler.
@@ -26,7 +26,7 @@
 
 **Bugs corrigidos:**
 - `highres_imu_encode(id=0)` → fallback sem `id` (MAVLink1 dialect)
-- `body_frame_accel()` → inclui aceleração real do veículo (não só gravidade)
+- `body_frame_accel()` → includes true vehicle acceleration, not gravity alone
 - `parse_buffer()` → filtra `None` da lista
 
 ---
@@ -64,7 +64,7 @@
 | # | Tarefa | Entrega |
 |---|--------|---------|
 | E1 | Loop principal: 50Hz, consome state estimator (pos_ned, vel_ned, yaw), envia POSITION_TARGET via cliente A | Loop estável |
-| E2 | Gate sequencing: avança para próximo gate quando drone entra em raio 1.5m do centro | Sequência automática |
+| E2 | Gate sequencing: advance to the next gate once the drone is within 1.5 m of centre | Automatic sequencing |
 | E3 | Waypoint NED para POSITION_TARGET: `(x,y,z)` + `(vx,vy,vz)` lookahead + `yaw` alinhado com gate | Mensagem correta |
 | E4 | Approach profile: desacelera para 3 m/s a 5m antes do gate, acelera após passar | Parâmetros configuráveis |
 | E5 | Heartbeat separado em thread a 2Hz | Nunca cai abaixo de 2Hz |
@@ -97,7 +97,7 @@
 - [ ] Integração visão → loop sem erro
 - [ ] Windows 11 Python 3.14.2 importa e roda sem erro
 
-Se CNN não ficar pronta: usar HSV fallback já implementado em `gate_detector.py`. Core mínimo já funciona sem visão.
+If the CNN is not ready, fall back to the HSV detector already implemented in `gate_detector.py`. The minimum core already works without vision.
 
 ---
 
@@ -130,12 +130,12 @@ scripts/
 
 ---
 
-## O que NÃO tocar (legacy preservado)
+## Do NOT touch (preserved legacy)
 
-- `simulation/gym_env.py` — mantém 243 testes como regressão
-- `submission/entry_point.py` / `dcl_adapter.py` — stub aguarda API oficial
-- `control/mpc_controller.py` — preservado para Round 2
-- `planning/trajectory_opt.py` — preservado para Round 2
+- `simulation/gym_env.py` — keeps the 243 tests as a regression suite
+- `submission/entry_point.py` / `dcl_adapter.py` — stub awaiting the official API
+- `control/mpc_controller.py` — preserved for Round 2
+- `planning/trajectory_opt.py` — preserved for Round 2
 
 ---
 
@@ -143,7 +143,7 @@ scripts/
 
 | Situação | Fallback |
 |----------|----------|
-| CNN não converge | HSV detector azul: `cv2.inRange(hsv, (100,80,40), (130,255,255))` |
+| CNN fails to converge | Blue HSV detector: `cv2.inRange(hsv, (100,80,40), (130,255,255))` |
 | State estimation deriva muito | Usar vel_ned integrada só por 10s e resetar com gate pass como âncora |
 | Windows 11 sem máquina | Paperspace A4000 Windows ($0.76/hr) ou GeForce NOW Enterprise |
 | JPEG stream difícil de reconstituir | Testar com frames inteiros primeiro (mock sem chunking), depois adicionar |

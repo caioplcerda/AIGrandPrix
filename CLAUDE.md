@@ -19,7 +19,7 @@ The **AI Grand Prix** is a global autonomous drone racing competition by **Andur
 | Physical Qualifier | September 2026 | In-person, Southern California (2 weeks) |
 | AI Grand Prix Final | November 2026 | Columbus, Ohio - live head-to-head racing |
 
-**Spec oficial**: VADR-TS-002 Issue 00.02 (2026-05-08) — MAVLink2/UDP interface released. See `260508_Technical_Spec_0002.pdf`.
+**Official spec**: VADR-TS-002 Issue 00.02 (2026-05-08) — MAVLink2/UDP interface. Issued by the organizers; not redistributed in this repo.
 
 ## Technical Requirements
 
