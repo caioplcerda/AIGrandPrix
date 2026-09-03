@@ -66,6 +66,24 @@ Distance to a gate is recovered from its apparent size: pixel bearings through a
 the state estimate — gain 0.3, correction capped at 2 m, replanning forced on correction. A
 hard snap to a single noisy detection would put a step into the trajectory at 40 m/s.
 
+## A hard run
+
+`titan_triple_helix_24` — 24 gates through three stacked helices at `max_speed` 38 m/s,
+the pattern that most punishes a planner: the approach vector rotates continuously, so any
+lookahead that overshoots the turn puts the vehicle outside the gate.
+
+![Triple helix run](scripts/runs/titan_triple_helix_24.gif)
+
+24/24 gates, peak 35.6 m/s. Roll saturates near ±50° for most of the run and speed cycles
+between roughly 5 and 35 m/s gate to gate — the vehicle is accelerating and braking into
+every turn rather than cruising. Rendered by
+[`scripts/render_run_video.py`](scripts/render_run_video.py) against the current
+MAVLink2/NED stack; full-resolution [MP4](scripts/runs/titan_triple_helix_24.mp4).
+
+```bash
+python scripts/render_run_video.py --course titan_chaos_30
+```
+
 ## Results
 
 Against `mock_sim`, five gates at 12 m spacing:
@@ -164,7 +182,14 @@ python scripts/train_yolo_gate.py --n_train 5000 --epochs 50 --device mps
 ```
 
 Trained weights are committed at `datasets/gate_yolo_mps/runs/gate_detector2/weights/best.pt`.
-Rendered flight videos for the stress courses are in `scripts/hard_courses_3d/`.
+
+```bash
+# Render a flight video from the current stack
+python scripts/render_run_video.py --course titan_triple_helix_24
+```
+
+Videos under `docs/legacy/videos/` are rendered from the superseded `gym_env` stack and top
+out near 5 m/s; they are kept as history, not as current results.
 
 ## Repository layout
 
@@ -174,7 +199,9 @@ Rendered flight videos for the stress courses are in `scripts/hard_courses_3d/`.
 | `run_vq1.py` | Competition entry point |
 | `tests/` | 243 unit tests across 19 modules |
 | `scripts/test_*_courses.py` | Stress batteries, one per difficulty tier |
-| `scripts/hard_courses_3d/` | Rendered flight videos |
+| `scripts/render_run_video.py` | Renders a flight video from the current stack |
+| `scripts/runs/` | Rendered runs |
+| `docs/legacy/` | Plots and videos from the superseded `gym_env` stack |
 | `docs/` | Roadmap, task breakdown, study notes |
 | `CLAUDE.md` | Detailed engineering log — phases, findings, tuning history |
 | `.claude/`, `.genie/` | Agent tooling and design notes — see below |

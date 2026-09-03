@@ -16,3 +16,13 @@ results, and should not be read as such:
 
 The attitude oscillation and saturated motor RPM visible here are exactly the
 behaviour the rebuild was meant to eliminate.
+
+## Legacy videos — `videos/`
+
+`videos/hard_courses_3d/` and `videos/flight_visualization.*` are rendered by
+`scripts/hard_course_videos.py`, which drives `simulation.gym_env` — the same
+legacy stack. They top out around 4-6 m/s and are not representative of the
+current code either.
+
+For a video of the current stack, see `scripts/runs/`, rendered by
+[`scripts/render_run_video.py`](../../scripts/render_run_video.py).

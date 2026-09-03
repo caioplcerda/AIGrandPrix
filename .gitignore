@@ -23,6 +23,7 @@ htmlcov/
 *.onnx
 models/checkpoints/
 runs/
+!scripts/runs/
 wandb/
 *.ipynb_checkpoints/
 
